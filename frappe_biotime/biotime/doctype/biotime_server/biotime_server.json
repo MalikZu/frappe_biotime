@@ -36,6 +36,7 @@
   "last_run_at",
   "last_run_result",
   "last_imported_count",
+  "waiting_punches",
   "column_break_status",
   "detected_version",
   "upload_order",
@@ -221,6 +222,13 @@
    "fieldtype": "Int",
    "label": "Last Imported",
    "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "description": "Punches that could not become checkins yet. Each import tries them again.",
+   "fieldname": "waiting_punches",
+   "fieldtype": "Int",
+   "label": "Waiting Punches",
    "read_only": 1
   },
   {

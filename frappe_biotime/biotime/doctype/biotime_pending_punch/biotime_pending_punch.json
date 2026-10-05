@@ -1,0 +1,156 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 0,
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-10-05 17:35:24.165771",
+ "description": "A BioTime punch that could not become an Employee Checkin yet. The import retries it and deletes it once imported.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "server",
+  "emp_code",
+  "punch_time",
+  "reason",
+  "column_break_main",
+  "employee",
+  "terminal_sn",
+  "last_tried",
+  "details_section",
+  "message",
+  "column_break_details",
+  "biotime_uid",
+  "punch_state",
+  "verify_type"
+ ],
+ "fields": [
+  {
+   "fieldname": "server",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "BioTime Server",
+   "options": "BioTime Server",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "emp_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee Code",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "punch_time",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Punch Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reason",
+   "options": "Unknown device ID\nInactive employee\nAfter relieving date\nLog type required\nNo terminal coordinates\nOutside check-in radius\nError",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "read_only": 1
+  },
+  {
+   "fieldname": "terminal_sn",
+   "fieldtype": "Data",
+   "label": "Terminal",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_tried",
+   "fieldtype": "Datetime",
+   "label": "Last Tried",
+   "read_only": 1
+  },
+  {
+   "fieldname": "details_section",
+   "fieldtype": "Section Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Small Text",
+   "label": "Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_details",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "biotime_uid",
+   "fieldtype": "Data",
+   "label": "BioTime Transaction",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "punch_state",
+   "fieldtype": "Data",
+   "label": "BioTime Punch State",
+   "read_only": 1
+  },
+  {
+   "fieldname": "verify_type",
+   "fieldtype": "Int",
+   "label": "BioTime Verify Type",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "in_create": 1,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-05 17:35:24.165771",
+ "modified_by": "Administrator",
+ "module": "BioTime",
+ "name": "BioTime Pending Punch",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "punch_time",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "emp_code"
+}

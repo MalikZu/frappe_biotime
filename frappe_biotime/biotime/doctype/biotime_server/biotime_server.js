@@ -42,5 +42,18 @@ frappe.ui.form.on("BioTime Server", {
 				actions
 			);
 		}
+		frm.add_custom_button(
+			__("Waiting Punches"),
+			() => frappe.set_route("List", "BioTime Pending Punch", { server: frm.doc.name }),
+			actions
+		);
+		frm.set_intro(
+			frm.doc.waiting_punches
+				? __("{0} punches are waiting to become checkins. Each import tries them again.", [
+						frm.doc.waiting_punches,
+				  ])
+				: "",
+			"orange"
+		);
 	},
 });
