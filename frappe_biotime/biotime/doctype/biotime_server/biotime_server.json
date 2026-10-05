@@ -30,6 +30,10 @@
   "in_states",
   "out_states",
   "skip_auto_attendance",
+  "attendance_section",
+  "attendance_buffer_minutes",
+  "column_break_attendance",
+  "attendance_hold_hours",
   "terminals_section",
   "terminals",
   "status_section",
@@ -37,6 +41,8 @@
   "last_run_result",
   "last_imported_count",
   "waiting_punches",
+  "imported_up_to",
+  "held_back_by",
   "column_break_status",
   "detected_version",
   "upload_order",
@@ -187,6 +193,33 @@
    "label": "Skip Auto Attendance"
   },
   {
+   "collapsible": 1,
+   "description": "Frappe HR marks attendance, Absent included, up to each Shift Type's Last Sync of Checkin. The app moves it forward only as far as every server has imported.",
+   "fieldname": "attendance_section",
+   "fieldtype": "Section Break",
+   "label": "Attendance"
+  },
+  {
+   "default": "60",
+   "description": "Last Sync of Checkin stays this far behind what is imported, for clock differences and slow uploads.",
+   "fieldname": "attendance_buffer_minutes",
+   "fieldtype": "Int",
+   "label": "Attendance Buffer (minutes)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_attendance",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "24",
+   "description": "A waiting punch younger than this holds attendance back, so it can be fixed before Frappe HR marks that day.",
+   "fieldname": "attendance_hold_hours",
+   "fieldtype": "Int",
+   "label": "Hold for Waiting Punches (hours)",
+   "non_negative": 1
+  },
+  {
    "fieldname": "terminals_section",
    "fieldtype": "Section Break",
    "label": "Terminals"
@@ -230,6 +263,21 @@
    "fieldname": "waiting_punches",
    "fieldtype": "Int",
    "label": "Waiting Punches",
+   "read_only": 1
+  },
+  {
+   "description": "Every punch from before this time is in Frappe or waiting.",
+   "fieldname": "imported_up_to",
+   "fieldtype": "Datetime",
+   "label": "Imported Up To",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "held_back_by",
+   "fieldtype": "Data",
+   "label": "Held Back By",
+   "no_copy": 1,
    "read_only": 1
   },
   {

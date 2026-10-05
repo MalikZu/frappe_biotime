@@ -42,14 +42,14 @@ class TestBioTimeServer(BioTimeTestCase):
 		self.assertTrue(enqueue.call_args.kwargs["retry_all"])
 
 	def test_start_over_reads_again_under_new_keys(self) -> None:
-		self.punch("1001", 8)
-		self.punch("1001", 9)
+		self.punch("1001", 8, id=101)
+		self.punch("1001", 9, id=102)
 		self.run_import()
 		# BioTime comes back from a backup taken before 9:00 and gives the next punch, at 10:00,
 		# the id that 9:00 had. Under the old keys that punch would look imported already.
 		self.fake = FakeBioTime()
-		self.punch("1001", 8)
-		self.punch("1001", 10)
+		self.punch("1001", 8, id=101)
+		self.punch("1001", 10, id=102)
 
 		with patch.object(frappe, "enqueue") as enqueue:
 			self.server.start_over(str(DAY.date()))

@@ -2,20 +2,22 @@
 # For license information, please see license.txt
 
 import contextlib
-from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import get_system_timezone, getdate
+from frappe.utils import getdate
 from redis.exceptions import LockError
 
-from frappe_biotime.biotime import connection
-from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import, import_lock
+from frappe_biotime.biotime import connection, watermark
+from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import, import_lock, site_time
 
 
 class BioTimeServer(Document):
+	def onload(self) -> None:
+		self.set_onload("attendance", watermark.notes(self))
+
 	def validate(self) -> None:
 		if self.timezone:
 			try:
@@ -67,7 +69,7 @@ class BioTimeServer(Document):
 			row.area_name = terminal.area_name or (terminal.area.area_name if terminal.area else None)
 			row.ip_address = terminal.ip_address
 			row.state = None if terminal.state is None else str(terminal.state)
-			row.last_activity = _site_datetime(terminal.last_activity)
+			row.last_activity = site_time(terminal.last_activity) if terminal.last_activity else None
 		self.save()
 		return len(terminals)
 
@@ -99,9 +101,3 @@ class BioTimeServer(Document):
 			with contextlib.suppress(LockError):
 				lock.release()
 		enqueue_import(self.name)
-
-
-def _site_datetime(value: datetime | None) -> datetime | None:
-	if value is not None and value.tzinfo is not None:
-		value = value.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
-	return value
