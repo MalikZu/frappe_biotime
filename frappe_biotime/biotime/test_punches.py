@@ -443,3 +443,13 @@ class TestPunchImport(BioTimeTestCase):
 
 		self.assertEqual(counts.imported, 1)
 		self.assertEqual(self.waiting(), [])
+
+	def test_codes_match_as_the_database_matches_them(self) -> None:
+		# Typed with an Arabic keyboard: the database takes these digits for 2002.
+		make_employee("biotime.digits@example.com", company="_Test Company", attendance_device_id="٢٠٠٢")
+		self.punch("2002", 8)
+
+		counts = self.run_import()
+
+		self.assertEqual(counts.imported, 1)
+		self.assertEqual(self.waiting(), [])
