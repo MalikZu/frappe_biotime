@@ -4,9 +4,11 @@
 from unittest.mock import patch
 
 import frappe
+from pybiotime.testing import FakeBioTime
 
+from frappe_biotime.biotime import punches
 from frappe_biotime.install import CUSTOM_FIELDS
-from frappe_biotime.tests.utils import GATE, BioTimeTestCase
+from frappe_biotime.tests.utils import DAY, GATE, BioTimeTestCase
 
 
 class TestBioTimeServer(BioTimeTestCase):
@@ -38,3 +40,49 @@ class TestBioTimeServer(BioTimeTestCase):
 
 		self.assertEqual(enqueue.call_args.kwargs["server"], self.server.name)
 		self.assertTrue(enqueue.call_args.kwargs["retry_all"])
+
+	def test_start_over_reads_again_under_new_keys(self) -> None:
+		self.punch("1001", 8)
+		self.punch("1001", 9)
+		self.run_import()
+		# BioTime comes back from a backup taken before 9:00 and gives the next punch, at 10:00,
+		# the id that 9:00 had. Under the old keys that punch would look imported already.
+		self.fake = FakeBioTime()
+		self.punch("1001", 8)
+		self.punch("1001", 10)
+
+		with patch.object(frappe, "enqueue") as enqueue:
+			self.server.start_over(str(DAY.date()))
+
+		self.assertEqual(enqueue.call_args.kwargs["server"], self.server.name)
+		self.server.reload()
+		self.assertEqual(self.server.key_generation, 2)
+		self.assertFalse(self.server.read_state)
+		counts = self.run_import()
+		self.assertEqual((counts.imported, counts.already_there), (1, 1))
+		checkins = self.checkins()
+		self.assertEqual([c.time.hour for c in checkins], [8, 9, 10])
+		self.assertTrue(checkins[2].biotime_uid.startswith(f"{self.server.name}:2:"))
+
+	def test_start_over_waits_for_a_running_import(self) -> None:
+		lock = punches.import_lock(self.server.name)
+		self.assertTrue(lock.acquire(blocking=False))
+		self.addCleanup(lock.release)
+
+		self.assertRaises(frappe.ValidationError, self.server.start_over, str(DAY.date()))
+		self.assertEqual(frappe.db.get_value("BioTime Server", self.server.name, "key_generation"), 1)
+
+	def test_start_over_needs_a_date(self) -> None:
+		self.assertRaises(frappe.ValidationError, self.server.start_over, "")
+
+	def test_a_reinstalled_biotime_points_to_start_over(self) -> None:
+		self.punch("1001", 8, id=50001)
+		self.run_import()
+		# BioTime is reinstalled, and its ids start again from 1.
+		self.punch("1001", 10, id=1, upload_time=DAY.replace(hour=11))
+
+		self.assertIsNone(punches.import_punches(self.server.name))
+
+		self.server.reload()
+		self.assertEqual(self.server.last_run_result, "Failed")
+		self.assertTrue(self.server.last_run_message.startswith(punches.RESTORED))

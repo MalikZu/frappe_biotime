@@ -40,6 +40,7 @@
   "column_break_status",
   "detected_version",
   "upload_order",
+  "key_generation",
   "unmapped_codes",
   "last_run_message",
   "read_state"
@@ -247,6 +248,15 @@
    "fieldname": "upload_order",
    "fieldtype": "Data",
    "label": "Upload Order",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "Part of every transaction key. Start Over raises it, so new keys never match old ones.",
+   "fieldname": "key_generation",
+   "fieldtype": "Int",
+   "label": "Key Generation",
    "no_copy": 1,
    "read_only": 1
   },
