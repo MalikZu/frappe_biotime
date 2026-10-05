@@ -48,16 +48,54 @@ frappe.ui.form.on("BioTime Server", {
 			() => frappe.set_route("List", "BioTime Pending Punch", { server: frm.doc.name }),
 			actions
 		);
-		frm.set_intro(
-			frm.doc.waiting_punches
-				? __("{0} punches are waiting to become checkins. Each import tries them again.", [
-						frm.doc.waiting_punches,
-				  ])
-				: "",
-			"orange"
-		);
+		const notes = attendance_notes(frm.doc.__onload?.attendance || {});
+		if (frm.doc.waiting_punches) {
+			notes.unshift(
+				__("{0} punches are waiting to become checkins. Each import tries them again.", [
+					frm.doc.waiting_punches,
+				])
+			);
+		}
+		frm.set_intro(notes.join("<br>"), "orange");
 	},
 });
+
+function attendance_notes(attendance) {
+	const list = (names) => names.map((name) => frappe.utils.escape_html(name)).join(", ");
+	const notes = [];
+	if (attendance.waiting_for?.length) {
+		notes.push(
+			__("Attendance does not move until these servers have imported once: {0}.", [
+				list(attendance.waiting_for),
+			])
+		);
+	}
+	if (attendance.self_moving?.length) {
+		notes.push(
+			__(
+				"These shift types move their own Last Sync of Checkin, which can mark people Absent before late punches arrive: {0}. Turn off Auto Update Last Sync on them.",
+				[list(attendance.self_moving)]
+			)
+		);
+	}
+	if (attendance.not_started?.length) {
+		notes.push(
+			__(
+				"These shift types have no Last Sync of Checkin, so Frappe HR marks no attendance for them yet: {0}. Set it once to when their punches start in Frappe, and the app moves it from there.",
+				[list(attendance.not_started)]
+			)
+		);
+	}
+	if (attendance.behind?.length) {
+		notes.push(
+			__(
+				"The app leaves these shift types alone because their Last Sync of Checkin is before Import From ({1}), and moving it would mark those days Absent: {0}. Set it to {1} or later.",
+				[list(attendance.behind), frappe.datetime.str_to_user(attendance.floor)]
+			)
+		);
+	}
+	return notes;
+}
 
 function start_over(frm) {
 	const dialog = new frappe.ui.Dialog({

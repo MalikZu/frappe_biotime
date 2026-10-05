@@ -1,0 +1,130 @@
+# Copyright (c) 2026, Malik AlZubaidi and Contributors
+# See license.txt
+
+from datetime import date, datetime, timedelta
+
+import frappe
+from erpnext.setup.doctype.employee.test_employee import make_employee
+from frappe.utils import add_to_date, get_datetime, now_datetime
+from hrms.hr.doctype.shift_type.test_shift_type import setup_shift_type
+
+from frappe_biotime.biotime import watermark
+from frappe_biotime.tests.utils import GATE, BioTimeTestCase
+
+IMPORT_FROM = datetime(2026, 10, 1)
+
+
+class TestAttendanceWatermark(BioTimeTestCase):
+	def test_a_current_server_moves_attendance_to_its_import_start(self) -> None:
+		shift = self.shift("_Test BioTime Day", last_sync=IMPORT_FROM)
+		self.punch("1001", 8)
+
+		self.run_import()
+
+		self.assertEqual(self.server.held_back_by, "This import's start")
+		self.assertEqual(self.last_sync(shift), self.server.imported_up_to - timedelta(minutes=60))
+
+	def test_an_offline_terminal_holds_attendance(self) -> None:
+		shift = self.shift("_Test BioTime Day", last_sync=IMPORT_FROM)
+		self.fake.add_terminal(sn="DOOR000001", last_activity="2026-10-03 18:00:00")
+
+		self.run_import()
+
+		self.assertEqual(self.server.imported_up_to, datetime(2026, 10, 3, 18, 0))
+		self.assertIn("DOOR000001", self.server.held_back_by)
+		self.assertEqual(self.last_sync(shift), datetime(2026, 10, 3, 17, 0))
+
+	def test_terminals_left_out_do_not_hold_attendance(self) -> None:
+		self.fake.add_terminal(sn="OFF0000001", last_activity="2026-10-02 08:00:00")
+		self.server.append("terminals", {"serial_number": "OFF0000001", "import_punches": 0})
+		self.server.save()
+
+		self.run_import()
+
+		self.assertEqual(self.server.held_back_by, "This import's start")
+
+	def test_a_recent_waiting_punch_holds_attendance(self) -> None:
+		recent = now_datetime().replace(microsecond=0) - timedelta(hours=2)
+		self.fake.add_transaction(emp_code="9999", punch_time=recent, terminal_sn=GATE)
+
+		self.run_import()
+
+		self.assertEqual(self.server.imported_up_to, recent)
+		self.assertIn("9999", self.server.held_back_by)
+
+	def test_old_and_inactive_waiting_punches_do_not_hold_attendance(self) -> None:
+		idle = make_employee("biotime.idle@example.com", company="_Test Company", attendance_device_id="1004")
+		frappe.db.set_value("Employee", idle, "status", "Inactive")
+		recent = now_datetime().replace(microsecond=0) - timedelta(hours=2)
+		self.fake.add_transaction(emp_code="1004", punch_time=recent, terminal_sn=GATE)
+		self.punch("9999", 8)  # days ago, older than the 24-hour hold
+
+		self.run_import()
+
+		self.assertEqual(len(self.waiting()), 2)
+		self.assertEqual(self.server.held_back_by, "This import's start")
+
+	def test_attendance_waits_for_every_server(self) -> None:
+		shift = self.shift("_Test BioTime Day", last_sync=IMPORT_FROM)
+		other = frappe.get_doc(
+			{
+				"doctype": "BioTime Server",
+				"server_name": "_Test BioTime Branch",
+				"url": "http://branch.test",
+				"import_from": date(2026, 10, 1),
+			}
+		).insert()
+
+		self.run_import()
+
+		self.assertEqual(self.last_sync(shift), IMPORT_FROM)
+		self.assertEqual(watermark.notes(self.server)["waiting_for"], [other.name])
+
+		frappe.db.set_value("BioTime Server", other.name, "imported_up_to", datetime(2026, 10, 2, 12, 0))
+		watermark.move_shift_types()
+
+		self.assertEqual(self.last_sync(shift), datetime(2026, 10, 2, 11, 0))
+
+	def test_shift_types_that_must_not_move(self) -> None:
+		moved = self.shift("_Test BioTime Moved", last_sync=IMPORT_FROM)
+		not_started = self.shift("_Test BioTime New", last_sync=None)
+		behind = self.shift("_Test BioTime Behind", last_sync=datetime(2026, 9, 30, 23, 0))
+		self_moving = self.shift("_Test BioTime Self", last_sync=IMPORT_FROM, auto_update_last_sync=1)
+		tomorrow = add_to_date(now_datetime(), days=1).replace(microsecond=0)
+		ahead = self.shift("_Test BioTime Ahead", last_sync=tomorrow)
+
+		self.run_import()
+
+		self.assertGreater(self.last_sync(moved), IMPORT_FROM)
+		self.assertIsNone(self.last_sync(not_started))
+		self.assertEqual(self.last_sync(behind), datetime(2026, 9, 30, 23, 0))
+		self.assertEqual(self.last_sync(self_moving), IMPORT_FROM)
+		self.assertEqual(self.last_sync(ahead), tomorrow)
+		notes = watermark.notes(self.server)
+		self.assertIn(moved, notes["moved"])
+		self.assertIn(not_started, notes["not_started"])
+		self.assertIn(behind, notes["behind"])
+		self.assertIn(self_moving, notes["self_moving"])
+		self.assertEqual(notes["floor"], "2026-10-01")
+
+	def test_unreadable_terminals_keep_attendance_where_it_is(self) -> None:
+		shift = self.shift("_Test BioTime Day", last_sync=IMPORT_FROM)
+		self.fake.fail_next(500, path="/iclock/api/terminals/")
+		self.punch("1001", 8)
+
+		counts = self.run_import()
+
+		self.assertEqual((counts.imported, self.server.last_run_result), (1, "Success"))
+		self.assertIsNone(self.server.imported_up_to)
+		self.assertIn("terminals could not be read", self.server.held_back_by)
+		self.assertEqual(self.last_sync(shift), IMPORT_FROM)
+
+	def shift(self, name: str, last_sync: datetime | None, **fields) -> str:
+		shift = setup_shift_type(shift_type=name, last_sync_of_checkin=last_sync or now_datetime(), **fields)
+		if last_sync is None:
+			frappe.db.set_value("Shift Type", shift.name, "last_sync_of_checkin", None)
+		return shift.name
+
+	def last_sync(self, shift: str) -> datetime | None:
+		value = frappe.db.get_value("Shift Type", shift, "last_sync_of_checkin")
+		return get_datetime(value) if value else None

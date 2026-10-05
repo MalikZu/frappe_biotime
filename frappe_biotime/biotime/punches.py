@@ -75,7 +75,7 @@ class Punch:
 		return cls(
 			uid=f"{server.name}:{server.key_generation or 1}:{punch.id}",
 			emp_code=punch.emp_code,
-			time=_site_time(punch.punch_time, site_timezone),
+			time=site_time(punch.punch_time, site_timezone),
 			terminal_sn=punch.terminal_sn or "",
 			punch_state=punch.punch_state,
 			verify_type=punch.verify_type,
@@ -182,10 +182,16 @@ def import_punches(server: str, retry_all: bool = False) -> ImportCounts | None:
 
 
 def _import(server: "BioTimeServer", retry_all: bool) -> ImportCounts | None:
+	# Imported here because the watermark module builds on this one.
+	from frappe_biotime.biotime import watermark
+
 	started = now_datetime()
 	counts = ImportCounts()
 	try:
 		with connection.connect(server) as client:
+			# Read before the punches: a terminal that reconnects after this read cannot
+			# move the watermark past punches it uploads later.
+			terminals, terminals_error = watermark.read_terminals(client)
 			result = client.transactions.read_new(
 				_read_state(server),
 				start=datetime.combine(getdate(server.import_from), time.min) if server.import_from else None,
@@ -202,20 +208,26 @@ def _import(server: "BioTimeServer", retry_all: bool) -> ImportCounts | None:
 		store_punches(
 			server, [Punch.from_waiting(row) for row in _retry_candidates(server, retry_all)], counts
 		)
+		waiting_now = _waiting_counts(server.name)
+		reach = watermark.reach(server, started, terminals, terminals_error)
+		_save_status(
+			server.name,
+			last_run_at=started,
+			last_run_result="Success",
+			last_run_message=summary(counts, waiting_now),
+			last_imported_count=counts.imported,
+			waiting_punches=waiting_now.total(),
+			unmapped_codes=_unmapped_codes(server.name),
+			held_back_by=reach.held_back_by,
+			# Unknown this run: keep the last known reach.
+			**({"imported_up_to": reach.at} if reach.at else {}),
+		)
+		watermark.move_shift_types()
+		frappe.db.commit()
 	except ReadStateError as exc:
 		return _fail(server, started, f"{RESTORED} {exc}")
 	except Exception as exc:
 		return _fail(server, started, f"{type(exc).__name__}: {exc}")
-	waiting_now = _waiting_counts(server.name)
-	_save_status(
-		server.name,
-		last_run_at=started,
-		last_run_result="Success",
-		last_run_message=summary(counts, waiting_now),
-		last_imported_count=counts.imported,
-		waiting_punches=waiting_now.total(),
-		unmapped_codes=_unmapped_codes(server.name),
-	)
 	return counts
 
 
@@ -619,10 +631,10 @@ def _log_type(server, punch: Punch, terminal, in_states: set[str], out_states: s
 	return None
 
 
-def _site_time(value: datetime, site_timezone: ZoneInfo) -> datetime:
-	"""A punch time as this site stores datetimes: naive, in the site's timezone."""
+def site_time(value: datetime, site_timezone: ZoneInfo | None = None) -> datetime:
+	"""A BioTime time as this site stores datetimes: naive, in the site's timezone."""
 	if value.tzinfo is not None:
-		value = value.astimezone(site_timezone).replace(tzinfo=None)
+		value = value.astimezone(site_timezone or ZoneInfo(get_system_timezone())).replace(tzinfo=None)
 	return value.replace(microsecond=0)
 
 
