@@ -227,7 +227,14 @@ def _servers() -> list:
 	servers = frappe.get_all(
 		"BioTime Server",
 		filters={"import_punches": 1, "mode": "Pull"},
-		fields=["name", "enabled", "imported_up_to", "import_from", "attendance_buffer_minutes"],
+		fields=[
+			"name",
+			"enabled",
+			"imported_up_to",
+			"import_from",
+			"imported_from",
+			"attendance_buffer_minutes",
+		],
 	)
 	return [server for server in servers if server.enabled or server.imported_up_to]
 
@@ -243,6 +250,14 @@ def _target(servers: list) -> datetime | None:
 
 
 def _floor(servers: list) -> datetime | None:
-	"""Midnight of the latest Import From: before it, some server's punches are not in Frappe."""
-	dates = [getdate(server.import_from) for server in servers if server.import_from]
+	"""Midnight of the latest date a server reads from: before it, its punches are not in Frappe.
+
+	Imported From once a server has read, since Import From may be edited later without reading
+	anything again; Import From before that.
+	"""
+	dates = [
+		getdate(server.imported_from or server.import_from)
+		for server in servers
+		if server.imported_from or server.import_from
+	]
 	return datetime.combine(max(dates), time.min) if dates else None

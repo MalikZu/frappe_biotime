@@ -105,6 +105,10 @@ earlier date marks days before the import began Absent. With several servers, us
 latest Import From. The app never starts a Shift Type, and leaves alone any it cannot
 move safely. The server form lists them.
 
+**Imported From** in the Status section is the date the imports have read every punch
+from. Editing **Import From** after the first import reads nothing again and does not
+change it.
+
 A terminal that is gone for good holds attendance until you untick its **Holds
 Attendance**. Do not untick Import Punches for that: its punches would then be left out,
 even ones it uploads if it comes back.
@@ -124,7 +128,9 @@ reuse old ids are missed until you run Start Over.
 
 Imports then read again from that date. Punches already in Frappe are recognized by
 their time and are not imported twice. **Key Generation** in the Status section goes
-up by one, so new punches never match old ones.
+up by one, so new punches never match old ones. **Imported From** stays where it was,
+because the punches before the date you pick were imported before the restore. A date
+before it moves it back once those punches are read.
 
 ## When an import fails
 

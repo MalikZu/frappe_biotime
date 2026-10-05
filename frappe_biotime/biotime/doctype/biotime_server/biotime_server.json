@@ -41,6 +41,7 @@
   "last_run_result",
   "last_imported_count",
   "waiting_punches",
+  "imported_from",
   "imported_up_to",
   "held_back_by",
   "column_break_status",
@@ -264,6 +265,14 @@
    "fieldname": "waiting_punches",
    "fieldtype": "Int",
    "label": "Waiting Punches",
+   "read_only": 1
+  },
+  {
+   "description": "Imports have read every punch from this date on. Editing Import From does not change it.",
+   "fieldname": "imported_from",
+   "fieldtype": "Date",
+   "label": "Imported From",
+   "no_copy": 1,
    "read_only": 1
   },
   {
