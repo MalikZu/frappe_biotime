@@ -342,3 +342,38 @@ class TestPunchImport(BioTimeTestCase):
 			return shift_type
 
 		self.enterContext(patch.object(shift_assignment, "get_shift_type", with_strict_setting))
+
+	def test_a_waiting_punch_without_a_verify_type_is_kept(self) -> None:
+		self.punch("9999", 8, verify_type="")
+
+		self.run_import()
+
+		self.assertEqual(self.waiting()[0].verify_type, 0)
+
+	def test_waiting_punches_stay_when_the_settings_now_leave_them_out(self) -> None:
+		self.punch("2002", 8)
+		self.run_import()
+		self.server.append("terminals", {"serial_number": GATE, "import_punches": 0})
+		self.server.save()
+
+		self.run_import()
+
+		self.assertEqual([w.reason for w in self.waiting()], [punches.LEFT_OUT])
+
+		# Undoing the setting and linking the code lets the punch in.
+		self.server.terminals[0].import_punches = 1
+		self.server.save()
+		make_employee("biotime.dana@example.com", company="_Test Company", attendance_device_id="2002")
+		counts = self.run_import()
+
+		self.assertEqual(counts.from_waiting, 1)
+		self.assertEqual(self.waiting(), [])
+
+	def test_codes_match_whatever_their_case(self) -> None:
+		make_employee("biotime.case@example.com", company="_Test Company", attendance_device_id="ab12")
+		self.punch("AB12", 8)
+
+		counts = self.run_import()
+
+		self.assertEqual(counts.imported, 1)
+		self.assertEqual(self.waiting(), [])

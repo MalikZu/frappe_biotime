@@ -18,7 +18,15 @@ from zoneinfo import ZoneInfo
 import frappe
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count, Max
-from frappe.utils import add_to_date, get_datetime, get_system_timezone, getdate, now_datetime, strip_html
+from frappe.utils import (
+	add_to_date,
+	cint,
+	get_datetime,
+	get_system_timezone,
+	getdate,
+	now_datetime,
+	strip_html,
+)
 from hrms.hr.doctype.employee_checkin.employee_checkin import CheckinRadiusExceededError
 from hrms.hr.doctype.shift_assignment.shift_assignment import get_actual_start_end_datetime_of_shift
 from pybiotime import ReadStateError, Transaction
@@ -53,6 +61,8 @@ LOG_TYPE_REQUIRED = "Log type required"
 NO_LOCATION = "No terminal coordinates"
 OUTSIDE_RADIUS = "Outside check-in radius"
 ERROR = "Error"
+#: A waiting punch that the server's settings now leave out. It stays, so undoing them lets it in.
+LEFT_OUT = "Left out by settings"
 
 
 @dataclass(frozen=True)
@@ -280,25 +290,41 @@ def _store_batch(context: _Context, batch: list[Punch], counts: ImportCounts) ->
 	"""Store one batch of punches, adding to `counts`."""
 	server = context.server
 	known = _known_uids(batch)
+	waiting = _waiting_keys(server.name, batch)
 	employees = _employees_by_code({punch.emp_code for punch in batch})
 	changes = _WaitingChanges(server.name)
-	planned = []
+	mapped = []
 	for punch in batch:
-		if punch.uid in known:
+		# A punch read again under a new key generation still matches its waiting row by time.
+		if punch.uid in known or (not punch.waiting and _waiting_key(punch) in waiting):
 			counts.already_there += 1
 			changes.resolve(punch)
 			continue
 		terminal = context.terminals.get(punch.terminal_sn)
-		if terminal and not terminal.import_punches:
-			counts.terminal_off += 1
-			changes.resolve(punch)
+		employee = employees.get(_code_key(punch.emp_code))
+		terminal_off = bool(terminal and not terminal.import_punches)
+		other_company = bool(employee and server.company and employee.company != server.company)
+		if punch.waiting and (terminal_off or other_company):
+			# Kept before the setting changed: it stays, so undoing the change lets it in.
+			changes.wait(punch, LEFT_OUT, counts, employee=employee.name if employee else None)
 			continue
-		employee = employees.get(punch.emp_code)
+		if terminal_off:
+			counts.terminal_off += 1
+			continue
 		if employee is None:
 			changes.wait(punch, UNMAPPED, counts)
 			continue
-		if server.company and employee.company != server.company:
+		if other_company:
 			counts.other_company += 1
+			continue
+		mapped.append((punch, employee, terminal))
+
+	logged = _logged_times(mapped)
+	for punch, employee, terminal in mapped:
+		# One physical punch is one checkin: a checkin at the same second already covers it,
+		# whatever the employee's status is now.
+		if (employee.name, punch.time) in logged:
+			counts.already_there += 1
 			changes.resolve(punch)
 			continue
 		if employee.status == "Inactive":
@@ -311,23 +337,14 @@ def _store_batch(context: _Context, batch: list[Punch], counts: ImportCounts) ->
 		):
 			changes.wait(punch, AFTER_RELIEVING, counts, employee=employee.name)
 			continue
-		planned.append((punch, employee.name, terminal))
-
-	logged = _logged_times(planned)
-	for punch, employee, terminal in planned:
-		# One physical punch is one checkin: a checkin at the same second already covers it.
-		if (employee, punch.time) in logged:
-			counts.already_there += 1
-			changes.resolve(punch)
-			continue
 		log_type = _log_type(server, punch, terminal, context.in_states, context.out_states)
-		checkin = _new_checkin(server, punch, employee, log_type, terminal)
+		checkin = _new_checkin(server, punch, employee.name, log_type, terminal)
 		failure = _insert(checkin, server, counts)
 		if failure:
 			reason, message = failure
-			changes.wait(punch, reason, counts, employee=employee, message=message)
+			changes.wait(punch, reason, counts, employee=employee.name, message=message)
 			continue
-		logged.add((employee, punch.time))
+		logged.add((employee.name, punch.time))
 		counts.imported += 1
 		if punch.waiting:
 			counts.from_waiting += 1
@@ -347,7 +364,7 @@ class _WaitingChanges:
 		self.changed: list[tuple[str, dict]] = []
 
 	def resolve(self, punch: Punch) -> None:
-		"""`punch` is in Frappe now, or left out on purpose: it waits no more."""
+		"""`punch` is in Frappe now: it waits no more."""
 		if punch.waiting:
 			self.resolved.append(punch.waiting.name)
 
@@ -420,7 +437,7 @@ def _insert_waiting(server: str, rows: list[tuple], now: datetime) -> None:
 			punch.time,
 			punch.terminal_sn or None,
 			punch.punch_state,
-			punch.verify_type,
+			cint(punch.verify_type),
 			reason,
 			employee,
 			message,
@@ -524,6 +541,33 @@ def _known_uids(batch: list[Punch]) -> set[str]:
 	return known
 
 
+def _waiting_keys(server: str, batch: list[Punch]) -> set[tuple[str, datetime]]:
+	"""(code, time) of the new punches in `batch` that already wait on this server, under any key."""
+	new = [punch for punch in batch if not punch.waiting]
+	if not new:
+		return set()
+	times = [punch.time for punch in new]
+	rows = frappe.get_all(
+		PENDING,
+		filters={
+			"server": server,
+			"emp_code": ["in", list({punch.emp_code for punch in new})],
+			"punch_time": ["between", [min(times), max(times)]],
+		},
+		fields=["emp_code", "punch_time"],
+	)
+	return {(_code_key(row.emp_code), get_datetime(row.punch_time)) for row in rows}
+
+
+def _waiting_key(punch: Punch) -> tuple[str, datetime]:
+	return (_code_key(punch.emp_code), punch.time)
+
+
+def _code_key(code: str | None) -> str:
+	"""A code as the database compares codes: case and trailing spaces do not count."""
+	return (code or "").rstrip().casefold()
+
+
 def _employees_by_code(codes: set[str]) -> dict[str, Any]:
 	if not codes:
 		return {}
@@ -532,18 +576,18 @@ def _employees_by_code(codes: set[str]) -> dict[str, Any]:
 		filters={"attendance_device_id": ["in", list(codes)]},
 		fields=["name", "attendance_device_id", "company", "status", "relieving_date"],
 	)
-	return {row.attendance_device_id: row for row in rows}
+	return {_code_key(row.attendance_device_id): row for row in rows}
 
 
-def _logged_times(planned: list) -> set[tuple[str, datetime]]:
+def _logged_times(mapped: list) -> set[tuple[str, datetime]]:
 	"""(employee, time) of the checkins that already exist for these punches."""
-	if not planned:
+	if not mapped:
 		return set()
-	times = [punch.time for punch, _employee, _terminal in planned]
+	times = [punch.time for punch, _employee, _terminal in mapped]
 	rows = frappe.get_all(
 		"Employee Checkin",
 		filters={
-			"employee": ["in", list({employee for _punch, employee, _terminal in planned})],
+			"employee": ["in", list({employee.name for _punch, employee, _terminal in mapped})],
 			"time": ["between", [min(times), max(times)]],
 		},
 		fields=["employee", "time"],
