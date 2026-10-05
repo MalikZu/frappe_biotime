@@ -299,6 +299,20 @@ class TestPunchImport(BioTimeTestCase):
 		)
 		self.assertEqual(self.checkins()[0].time, expected)
 
+	def test_the_first_read_starts_at_midnight_on_this_sites_clock(self) -> None:
+		# BioTime runs far behind this site, so this site's first hours of Import From are
+		# still the day before in BioTime.
+		biotime_zone = "Etc/GMT+12"
+		self.server.timezone = biotime_zone
+		self.server.save()
+		one_am = DAY.replace(hour=1)
+		punched = one_am.replace(tzinfo=ZoneInfo(get_system_timezone())).astimezone(ZoneInfo(biotime_zone))
+		self.fake.add_transaction(emp_code="1001", punch_time=punched.replace(tzinfo=None), terminal_sn=GATE)
+
+		self.run_import()
+
+		self.assertEqual([checkin.time for checkin in self.checkins()], [one_am])
+
 	def test_a_failed_run_keeps_the_read_state(self) -> None:
 		self.punch("1001", 8)
 		self.fake.fail_next(500, path="/iclock/api/transactions/")
