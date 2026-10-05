@@ -1,0 +1,57 @@
+# Copyright (c) 2026, Malik AlZubaidi and contributors
+# For license information, please see license.txt
+
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import frappe
+from frappe import _
+from frappe.model.document import Document
+from frappe.utils import get_system_timezone
+
+from frappe_biotime.biotime.connection import connect
+
+
+class BioTimeServer(Document):
+	def validate(self) -> None:
+		if self.timezone:
+			try:
+				ZoneInfo(self.timezone)
+			except ZoneInfoNotFoundError, ValueError:
+				frappe.throw(_("{0} is not a timezone name, such as Asia/Dubai.").format(self.timezone))
+		if self.lookback_days is not None and self.lookback_days < 0:
+			frappe.throw(_("Lookback cannot be negative."))
+
+	@frappe.whitelist()
+	def test_connection(self) -> dict:
+		"""Log in, and report what the server shows about its version."""
+		with connect(self) as client:
+			info = client.server_info()
+		frappe.db.set_value(self.doctype, self.name, "detected_version", info.version, update_modified=False)
+		return {
+			"version": info.version,
+			"docs_title": info.docs_title,
+			"has_resigns": info.has_resigns,
+		}
+
+	@frappe.whitelist()
+	def sync_terminals(self) -> int:
+		"""Add BioTime's terminals to the table and refresh their details. Returns the count."""
+		with connect(self) as client:
+			terminals = list(client.terminals.list())
+		rows = {row.serial_number: row for row in self.terminals}
+		for terminal in terminals:
+			row = rows.get(terminal.sn) or self.append("terminals", {"serial_number": terminal.sn})
+			row.alias = terminal.alias
+			row.area_name = terminal.area_name or (terminal.area.area_name if terminal.area else None)
+			row.ip_address = terminal.ip_address
+			row.state = None if terminal.state is None else str(terminal.state)
+			row.last_activity = _site_datetime(terminal.last_activity)
+		self.save()
+		return len(terminals)
+
+
+def _site_datetime(value: datetime | None) -> datetime | None:
+	if value is not None and value.tzinfo is not None:
+		value = value.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
+	return value
