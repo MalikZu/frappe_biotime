@@ -254,7 +254,7 @@ def store_punches(server: "BioTimeServer", punches: list[Punch], counts: ImportC
 		except Exception:
 			frappe.db.rollback(save_point="biotime_batch")
 			raise
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep
 
 
 @dataclass
@@ -650,6 +650,7 @@ def _read_state(server: "BioTimeServer") -> dict[str, Any] | None:
 
 
 def _save_status(server: str, **values: Any) -> None:
-	# Saved without the document, so routine runs create no versions or modified stamps.
+	# Saved without the document, so routine runs create no versions or modified stamps, and
+	# committed at once, so the status survives a run that fails later.
 	frappe.db.set_value("BioTime Server", server, values, update_modified=False)
-	frappe.db.commit()
+	frappe.db.commit()  # nosemgrep

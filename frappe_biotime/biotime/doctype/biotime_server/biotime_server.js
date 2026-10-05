@@ -27,7 +27,10 @@ frappe.ui.form.on("BioTime Server", {
 			__("Sync Terminals"),
 			() =>
 				frm.call("sync_terminals").then(({ message }) => {
-					frappe.show_alert({ message: __("{0} terminals synced", [message]), indicator: "green" });
+					frappe.show_alert({
+						message: __("{0} terminals synced", [message]),
+						indicator: "green",
+					});
 					frm.reload_doc();
 				}),
 			actions
@@ -36,9 +39,11 @@ frappe.ui.form.on("BioTime Server", {
 			frm.add_custom_button(
 				__("Import Now"),
 				() =>
-					frm.call("import_now").then(() =>
-						frappe.show_alert({ message: __("Import queued"), indicator: "blue" })
-					),
+					frm
+						.call("import_now")
+						.then(() =>
+							frappe.show_alert({ message: __("Import queued"), indicator: "blue" })
+						),
 				actions
 			);
 			frm.add_custom_button(__("Start Over"), () => start_over(frm), actions);
