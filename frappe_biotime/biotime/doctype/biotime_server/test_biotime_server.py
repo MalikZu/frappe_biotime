@@ -10,6 +10,7 @@ from pybiotime import BioTimeClient, TokenAuth
 from pybiotime.testing import FakeBioTime
 
 from frappe_biotime.biotime.doctype.biotime_server import biotime_server
+from frappe_biotime.install import CUSTOM_FIELDS
 
 GATE = "GATE0000001"
 
@@ -41,6 +42,11 @@ class TestBioTimeServer(HRMSTestSuite):
 			transport=self.fake.transport(),
 			page_size=1000,
 		)
+
+	def test_custom_fields_exist(self) -> None:
+		meta = frappe.get_meta("Employee Checkin")
+		for field in CUSTOM_FIELDS["Employee Checkin"]:
+			self.assertTrue(meta.has_field(field["fieldname"]), field["fieldname"])
 
 	def test_sync_terminals(self) -> None:
 		self.server.reload()

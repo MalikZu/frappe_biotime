@@ -87,12 +87,13 @@ required_apps = ["frappe/erpnext", "frappe/hrms"]
 # ------------
 
 # before_install = "frappe_biotime.install.before_install"
-# after_install = "frappe_biotime.install.after_install"
+after_install = "frappe_biotime.install.after_install"
+after_migrate = "frappe_biotime.install.after_migrate"
 
 # Uninstallation
 # ------------
 
-# before_uninstall = "frappe_biotime.uninstall.before_uninstall"
+before_uninstall = "frappe_biotime.install.before_uninstall"
 # after_uninstall = "frappe_biotime.uninstall.after_uninstall"
 
 # Integration Setup
