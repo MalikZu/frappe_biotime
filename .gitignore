@@ -1,0 +1,54 @@
+# Private maintainer notes and research. Never commit.
+internal/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Frappe / Node
+node_modules/
+dist/
+*.swp
+tags
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# From the Frappe app template
+*$py.class
+*.pyc
+*.py~
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+.installed.cfg
+*.egg
+MANIFEST
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+jspm_packages/
+.vs/
+.kdev4/
+*.kdev4
+*.DS_Store
+*.comp.js
+.wnf-lang-status
+*debug.log
+.helix/
+.aider*
