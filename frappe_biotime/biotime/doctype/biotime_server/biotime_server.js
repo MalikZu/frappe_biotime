@@ -32,5 +32,15 @@ frappe.ui.form.on("BioTime Server", {
 				}),
 			actions
 		);
+		if (frm.doc.mode === "Pull" && frm.doc.import_punches) {
+			frm.add_custom_button(
+				__("Import Now"),
+				() =>
+					frm.call("import_now").then(() =>
+						frappe.show_alert({ message: __("Import queued"), indicator: "blue" })
+					),
+				actions
+			);
+		}
 	},
 });

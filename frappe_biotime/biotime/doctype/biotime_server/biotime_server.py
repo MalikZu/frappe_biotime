@@ -10,6 +10,7 @@ from frappe.model.document import Document
 from frappe.utils import get_system_timezone
 
 from frappe_biotime.biotime.connection import connect
+from frappe_biotime.biotime.punches import enqueue_import
 
 
 class BioTimeServer(Document):
@@ -49,6 +50,11 @@ class BioTimeServer(Document):
 			row.last_activity = _site_datetime(terminal.last_activity)
 		self.save()
 		return len(terminals)
+
+	@frappe.whitelist()
+	def import_now(self) -> None:
+		"""Queue an import now instead of waiting for the scheduler."""
+		enqueue_import(self.name)
 
 
 def _site_datetime(value: datetime | None) -> datetime | None:

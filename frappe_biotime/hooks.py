@@ -151,6 +151,13 @@ before_uninstall = "frappe_biotime.install.before_uninstall"
 # Scheduled Tasks
 # ---------------
 
+scheduler_events = {
+	"cron": {
+		# Frappe v16 ticks every 4 minutes. This job only queues the imports on the long queue.
+		"*/4 * * * *": ["frappe_biotime.biotime.punches.enqueue_imports"],
+	},
+}
+
 # scheduler_events = {
 # 	"all": [
 # 		"frappe_biotime.tasks.all"
