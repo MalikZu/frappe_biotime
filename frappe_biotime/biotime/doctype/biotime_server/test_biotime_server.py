@@ -9,6 +9,9 @@ from zoneinfo import ZoneInfo
 import frappe
 from erpnext.setup.doctype.employee.test_employee import make_employee
 from frappe.utils import get_system_timezone
+from hrms.hr.doctype.employee_checkin.test_employee_checkin import make_shift_location
+from hrms.hr.doctype.shift_assignment import shift_assignment
+from hrms.hr.doctype.shift_type.test_shift_type import make_shift_assignment, setup_shift_type
 from hrms.tests.utils import HRMSTestSuite
 from pybiotime import BioTimeClient, TokenAuth
 from pybiotime.testing import FakeBioTime
@@ -156,6 +159,57 @@ class TestBioTimeServer(HRMSTestSuite):
 
 		self.assertEqual(counts.duplicate, 1)
 		self.assertEqual(counts.imported, 0)
+
+	def test_blank_log_types_in_a_strict_shift_are_counted(self) -> None:
+		# Frappe HR 16 leaves this setting out of the shift its checkin validation reads, so it
+		# accepts blank log types there; Frappe HR 15 refuses them. Put it back to get the refusal.
+		get_shift_type = shift_assignment.get_shift_type
+
+		def with_strict_setting(name):
+			shift_type = get_shift_type(name)
+			shift_type.determine_check_in_and_check_out = frappe.db.get_value(
+				"Shift Type", name, "determine_check_in_and_check_out"
+			)
+			return shift_type
+
+		self.enterContext(patch.object(shift_assignment, "get_shift_type", with_strict_setting))
+		shift = setup_shift_type(
+			shift_type="_Test BioTime Strict",
+			start_time="07:00:00",
+			end_time="16:00:00",
+			determine_check_in_and_check_out=punches.STRICT_LOG_TYPE,
+		)
+		make_shift_assignment(shift.name, self.sara, DAY.date())
+		frappe.clear_messages()
+		self.server.save()
+		self.assertIn("need a log type", str(frappe.get_message_log()))
+		self.punch("1001", 8)  # inside the shift
+		self.punch("1001", 20)  # after it
+		frappe.clear_messages()
+
+		counts = self.run_import()
+
+		self.assertEqual((counts.imported, counts.log_type_required), (1, 1))
+		self.assertEqual([c.time.hour for c in self.checkins()], [20])
+		self.assertEqual(frappe.get_message_log(), [])
+
+	@HRMSTestSuite.change_settings("HR Settings", {"allow_geolocation_tracking": 1})
+	def test_geolocation_refusals_are_counted(self) -> None:
+		shift = setup_shift_type(shift_type="_Test BioTime Shift", start_time="07:00:00", end_time="16:00:00")
+		site = make_shift_location("_Test BioTime Site", 25.2, 55.3, checkin_radius=500)
+		make_shift_assignment(shift.name, self.sara, DAY.date(), shift_location=site.name)
+		self.server.append("terminals", {"serial_number": "NEAR000001", "latitude": 25.2, "longitude": 55.3})
+		self.server.append("terminals", {"serial_number": "FAR0000001", "latitude": 25.3, "longitude": 55.4})
+		self.server.save()
+		self.punch("1001", 8, terminal_sn="NEAR000001")
+		self.punch("1001", 9, terminal_sn="FAR0000001")  # about 15 km from the site
+		self.punch("1001", 10)  # the gate has no coordinates
+
+		counts = self.run_import()
+
+		self.assertEqual((counts.imported, counts.outside_radius, counts.no_location), (1, 1, 1))
+		(checkin,) = self.checkins()
+		self.assertEqual((checkin.device_id, checkin.latitude, checkin.longitude), ("NEAR000001", 25.2, 55.3))
 
 	def test_log_type_from_punch_states(self) -> None:
 		self.server.log_type_mode = "Map punch states"

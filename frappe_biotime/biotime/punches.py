@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo
 
 import frappe
 from frappe.utils import get_system_timezone, getdate, now_datetime
+from hrms.hr.doctype.employee_checkin.employee_checkin import CheckinRadiusExceededError
+from hrms.hr.doctype.shift_assignment.shift_assignment import get_actual_start_end_datetime_of_shift
 from pybiotime import Transaction
 from redis.exceptions import LockError
 
@@ -27,6 +29,8 @@ if TYPE_CHECKING:
 BATCH_SIZE = 500
 #: How many unmapped employee codes the server record lists.
 MAX_LISTED_CODES = 50
+#: The Shift Type setting under which Frappe HR refuses checkins without a log type.
+STRICT_LOG_TYPE = "Strictly based on Log Type in Employee Checkin"
 
 
 @dataclass
@@ -39,6 +43,9 @@ class ImportCounts:
 	terminal_off: int = 0
 	inactive: int = 0
 	after_relieving: int = 0
+	log_type_required: int = 0
+	no_location: int = 0
+	outside_radius: int = 0
 	unmapped_codes: set[str] = field(default_factory=set)
 
 	def summary(self) -> str:
@@ -50,6 +57,9 @@ class ImportCounts:
 			(self.terminal_off, "terminal not imported"),
 			(self.inactive, "employee inactive"),
 			(self.after_relieving, "after the employee's relieving date"),
+			(self.log_type_required, "no log type in a shift that needs one"),
+			(self.no_location, "terminal has no coordinates and geolocation tracking is on"),
+			(self.outside_radius, "outside the shift location's check-in radius"),
 		]
 		parts = [f"{count} {reason}" for count, reason in skipped if count]
 		message = f"Imported {self.imported}."
@@ -197,12 +207,26 @@ def _store_batch(server, transactions, counts, employees, terminals, in_states, 
 		if (employee, punch_time, log_type or "") in logged:
 			counts.duplicate += 1
 			continue
-		_insert_checkin(server, uid, punch, employee, punch_time, log_type, terminal)
+		checkin = _new_checkin(server, uid, punch, employee, punch_time, log_type, terminal)
+		frappe.db.savepoint("biotime_checkin")
+		try:
+			# `time` is a permlevel 1 field: without level 1 write access it is silently reset to now.
+			checkin.insert(ignore_permissions=True)
+		except frappe.ValidationError as exc:
+			reason = _refusal(checkin, exc)
+			if reason is None:
+				raise
+			# Frappe HR refused this one punch on purpose: undo it, count it, and go on.
+			frappe.db.rollback(save_point="biotime_checkin")
+			frappe.clear_last_message()
+			setattr(counts, reason, getattr(counts, reason) + 1)
+			continue
+		frappe.db.release_savepoint("biotime_checkin")
 		logged.add((employee, punch_time, log_type or ""))
 		counts.imported += 1
 
 
-def _insert_checkin(server, uid, punch, employee, punch_time, log_type, terminal) -> None:
+def _new_checkin(server, uid, punch, employee, punch_time, log_type, terminal):
 	checkin = frappe.new_doc("Employee Checkin")
 	checkin.update(
 		{
@@ -220,8 +244,29 @@ def _insert_checkin(server, uid, punch, employee, punch_time, log_type, terminal
 	if terminal and (terminal.latitude or terminal.longitude):
 		checkin.latitude = terminal.latitude
 		checkin.longitude = terminal.longitude
-	# `time` is a permlevel 1 field: without level 1 write access it is silently reset to now.
-	checkin.insert(ignore_permissions=True)
+	return checkin
+
+
+def _refusal(checkin, exc: Exception) -> str | None:
+	"""The `ImportCounts` field for a checkin Frappe HR refused on purpose, else None.
+
+	These checks repeat Frappe HR's own, in its order, and run only after it refused, so
+	a punch it would accept is never skipped. Other errors fail the run.
+	"""
+	if isinstance(exc, CheckinRadiusExceededError):
+		return "outside_radius"
+	if not checkin.log_type and not checkin.skip_auto_attendance:
+		shift = get_actual_start_end_datetime_of_shift(checkin.employee, checkin.time, True)
+		# Read from the record: Frappe HR 16 leaves this setting out of the shift it returns.
+		if shift and STRICT_LOG_TYPE == frappe.get_cached_value(
+			"Shift Type", shift.shift_type.name, "determine_check_in_and_check_out"
+		):
+			return "log_type_required"
+	if not (checkin.latitude or checkin.longitude) and frappe.db.get_single_value(
+		"HR Settings", "allow_geolocation_tracking"
+	):
+		return "no_location"
+	return None
 
 
 def _employees_by_code(codes: set[str]) -> dict[str, Any]:

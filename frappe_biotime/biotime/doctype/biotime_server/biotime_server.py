@@ -10,7 +10,7 @@ from frappe.model.document import Document
 from frappe.utils import get_system_timezone
 
 from frappe_biotime.biotime.connection import connect
-from frappe_biotime.biotime.punches import enqueue_import
+from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import
 
 
 class BioTimeServer(Document):
@@ -22,6 +22,24 @@ class BioTimeServer(Document):
 				frappe.throw(_("{0} is not a timezone name, such as Asia/Dubai.").format(self.timezone))
 		if self.lookback_days is not None and self.lookback_days < 0:
 			frappe.throw(_("Lookback cannot be negative."))
+		self.warn_about_strict_shifts()
+
+	def warn_about_strict_shifts(self) -> None:
+		if not self.import_punches or self.skip_auto_attendance or self.log_type_mode != "Leave blank":
+			return
+		strict = frappe.get_all(
+			"Shift Type", filters={"determine_check_in_and_check_out": STRICT_LOG_TYPE}, pluck="name"
+		)
+		if strict:
+			frappe.msgprint(
+				_(
+					"These shift types need a log type on every checkin: {0}. This server leaves it "
+					"blank, so Frappe HR may refuse its punches in those shifts or leave them out of "
+					"attendance. Map punch states or set terminal directions instead."
+				).format(", ".join(strict)),
+				title=_("Log type"),
+				indicator="orange",
+			)
 
 	@frappe.whitelist()
 	def test_connection(self) -> dict:
