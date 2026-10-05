@@ -75,6 +75,28 @@ Two kinds are counted in **Last Message** and not kept:
 - **Left out by this server's settings:** the terminal's **Import Punches** is off, or
   the employee belongs to another company than the server's **Company**.
 
+## Attendance
+
+Frappe HR marks attendance, Absent included, for each Shift Type up to its **Last Sync of
+Checkin**. Moving it before every punch is in Frappe would mark people Absent who were
+there. So after each import, the app moves it forward on every Shift Type with **Enable
+Auto Attendance** on and **Auto Update Last Sync** off, but only as far as every server
+has imported:
+
+- Each server's **Imported Up To** is the earliest of the import's start, the last
+  contact of each terminal whose punches are imported, and the oldest waiting punch
+  younger than **Hold for Waiting Punches** (24 hours by default). **Held Back By** says
+  which one. A terminal that is offline may still hold punches, so it holds attendance.
+- Last Sync of Checkin then moves to the earliest Imported Up To of all enabled servers,
+  minus **Attendance Buffer** (60 minutes by default). It never moves back.
+
+**Set Last Sync of Checkin once yourself**, to **Import From** or later. The app never
+starts a Shift Type, and leaves alone any whose last sync is earlier than Import From or
+that update it themselves. The server form lists those Shift Types.
+
+A terminal that is gone for good holds attendance until you untick its **Import Punches**.
+Waiting punches of inactive employees, or from after a relieving date, do not hold it.
+
 ## After a BioTime restore
 
 When BioTime's database is restored from a backup or reinstalled, it gives new punches
