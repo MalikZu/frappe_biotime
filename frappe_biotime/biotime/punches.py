@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 BATCH_SIZE = 500
 #: How many waiting punches one scheduled run tries again.
 RETRY_LIMIT = 5000
+#: Errors may be passing faults, so an Error punch is tried again after this many minutes.
+ERROR_RETRY_MINUTES = 10
 #: How many unmapped employee codes the server record lists.
 MAX_LISTED_CODES = 50
 #: What a run reports when BioTime's transaction ids start over.
@@ -184,18 +186,22 @@ def import_punches(server: str, retry_all: bool = False) -> ImportCounts | None:
 	if not lock.acquire(blocking=False):
 		return None
 	try:
-		return _import(frappe.get_doc("BioTime Server", server), retry_all)
+		# End the job's open transaction, so the run reads everything committed before
+		# `started`. Anything committed later is newer than every last_tried the run writes,
+		# so the next run tries those punches again.
+		frappe.db.commit()  # nosemgrep
+		started = now_datetime()
+		return _import(frappe.get_doc("BioTime Server", server), retry_all, started)
 	finally:
 		# The lock may have expired during a very long run.
 		with contextlib.suppress(LockError):
 			lock.release()
 
 
-def _import(server: "BioTimeServer", retry_all: bool) -> ImportCounts | None:
+def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> ImportCounts | None:
 	# Imported here because the watermark module builds on this one.
 	from frappe_biotime.biotime import watermark
 
-	started = now_datetime()
 	counts = ImportCounts()
 	try:
 		with connection.connect(server) as client:
@@ -209,15 +215,17 @@ def _import(server: "BioTimeServer", retry_all: bool) -> ImportCounts | None:
 			)
 		site_timezone = ZoneInfo(get_system_timezone())
 		store_punches(
-			server, [Punch.from_transaction(server, t, site_timezone) for t in result.transactions], counts
+			server,
+			[Punch.from_transaction(server, t, site_timezone) for t in result.transactions],
+			counts,
+			started,
 		)
 		# Every new punch is now a checkin or waiting, so the next run can start after them.
 		_save_status(
 			server.name, read_state=json.dumps(result.state), upload_order=result.state.get("upload_order")
 		)
-		store_punches(
-			server, [Punch.from_waiting(row) for row in _retry_candidates(server, retry_all)], counts
-		)
+		retries = _retry_candidates(server, retry_all, started)
+		store_punches(server, [Punch.from_waiting(row) for row in retries], counts, started)
 		waiting_now = _waiting_counts(server.name)
 		reach = watermark.reach(server, started, terminals, terminals_error)
 		_save_status(
@@ -250,11 +258,16 @@ def _fail(server: "BioTimeServer", started: datetime, message: str) -> None:
 	_save_status(server.name, last_run_at=started, last_run_result="Failed", last_run_message=message[:1000])
 
 
-def store_punches(server: "BioTimeServer", punches: list[Punch], counts: ImportCounts) -> None:
-	"""Turn `punches` into checkins or waiting punches, and commit them in batches."""
+def store_punches(
+	server: "BioTimeServer", punches: list[Punch], counts: ImportCounts, stamp: datetime
+) -> None:
+	"""Turn `punches` into checkins or waiting punches, and commit them in batches.
+
+	`stamp` is the run's start, written as last_tried on every waiting punch.
+	"""
 	if not punches:
 		return
-	context = _Context.of(server)
+	context = _Context.of(server, stamp)
 	for start in range(0, len(punches), BATCH_SIZE):
 		# A failed batch is undone on its own; batches committed before it stay, and the
 		# next run recognizes them by biotime_uid.
@@ -272,14 +285,16 @@ class _Context:
 	"""What every batch of one run needs from the server."""
 
 	server: Any
+	stamp: datetime
 	terminals: dict[str, Any]
 	in_states: set[str]
 	out_states: set[str]
 
 	@classmethod
-	def of(cls, server: "BioTimeServer") -> "_Context":
+	def of(cls, server: "BioTimeServer", stamp: datetime) -> "_Context":
 		return cls(
 			server=server,
+			stamp=stamp,
 			terminals={row.serial_number: row for row in server.terminals},
 			in_states=_codes(server.in_states),
 			out_states=_codes(server.out_states),
@@ -292,7 +307,7 @@ def _store_batch(context: _Context, batch: list[Punch], counts: ImportCounts) ->
 	known = _known_uids(batch)
 	waiting = _waiting_keys(server.name, batch)
 	employees = _employees_by_code({punch.emp_code for punch in batch})
-	changes = _WaitingChanges(server.name)
+	changes = _WaitingChanges(server.name, context.stamp)
 	mapped = []
 	for punch in batch:
 		# A punch read again under a new key generation still matches its waiting row by time.
@@ -355,9 +370,9 @@ def _store_batch(context: _Context, batch: list[Punch], counts: ImportCounts) ->
 class _WaitingChanges:
 	"""What one batch changes in BioTime Pending Punch, written together at the end."""
 
-	def __init__(self, server: str) -> None:
+	def __init__(self, server: str, now: datetime) -> None:
 		self.server = server
-		self.now = now_datetime()
+		self.now = now
 		self.resolved: list[str] = []
 		self.new: list[tuple] = []
 		self.tried: list[str] = []
@@ -595,7 +610,7 @@ def _logged_times(mapped: list) -> set[tuple[str, datetime]]:
 	return {(row.employee, row.time) for row in rows}
 
 
-def _retry_candidates(server: "BioTimeServer", retry_all: bool) -> list:
+def _retry_candidates(server: "BioTimeServer", retry_all: bool, stamp: datetime) -> list:
 	"""The waiting punches worth trying again in this run."""
 	table = DocType(PENDING)
 	employee = DocType("Employee")
@@ -620,8 +635,12 @@ def _retry_candidates(server: "BioTimeServer", retry_all: bool) -> list:
 	)
 	if not retry_all:
 		query = query.where(
-			(table.last_tried < add_to_date(now_datetime(), days=-1))
+			(table.last_tried < add_to_date(stamp, days=-1))
 			| (table.last_tried < _settings_changed_at(server))
+			| (
+				(table.reason == ERROR)
+				& (table.last_tried < add_to_date(stamp, minutes=-ERROR_RETRY_MINUTES))
+			)
 			# Its code now belongs to an employee, or that employee changed.
 			| (employee.name.isnotnull() & (table.employee.isnull() | (employee.modified > table.last_tried)))
 		).limit(RETRY_LIMIT)
