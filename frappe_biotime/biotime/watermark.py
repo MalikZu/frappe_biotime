@@ -117,9 +117,10 @@ def _holding_punch(server: "BioTimeServer", started: datetime) -> Any:
 	"""The oldest waiting punch that holds attendance, if any.
 
 	Refusals and errors hold until they import or are deleted. An unknown code holds only
-	while it is new: punched within the server's hold, and not seen before it, so a code that
-	never gets linked, such as a visitor's, stops holding. Inactive, After relieving date and
-	Left out by settings never hold, because Frappe HR marks no attendance from them.
+	while it is new: first stored within the server's hold, so a code that never gets linked,
+	such as a visitor's, stops holding. Stored, not punched: a new code that arrives in a late
+	upload holds too. Inactive, After relieving date and Left out by settings never hold,
+	because Frappe HR marks no attendance from them.
 	"""
 	table = DocType(PENDING)
 	holds = table.reason.isin(HOLD_UNTIL_RESOLVED)
@@ -129,10 +130,10 @@ def _holding_punch(server: "BioTimeServer", started: datetime) -> Any:
 		seen_before = (
 			frappe.qb.from_(older)
 			.select(older.emp_code)
-			.where((older.server == server.name) & (older.reason == UNMAPPED) & (older.punch_time < cutoff))
+			.where((older.server == server.name) & (older.reason == UNMAPPED) & (older.creation < cutoff))
 		)
 		holds = holds | (
-			(table.reason == UNMAPPED) & (table.punch_time >= cutoff) & table.emp_code.notin(seen_before)
+			(table.reason == UNMAPPED) & (table.creation >= cutoff) & table.emp_code.notin(seen_before)
 		)
 	rows = (
 		frappe.qb.from_(table)
