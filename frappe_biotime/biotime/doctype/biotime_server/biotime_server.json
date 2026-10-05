@@ -49,7 +49,8 @@
   "key_generation",
   "unmapped_codes",
   "last_run_message",
-  "read_state"
+  "read_state",
+  "retry_requested_at"
  ],
  "fields": [
   {
@@ -327,6 +328,14 @@
    "fieldtype": "JSON",
    "hidden": 1,
    "label": "Read State",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "retry_requested_at",
+   "fieldtype": "Datetime",
+   "hidden": 1,
+   "label": "Retry Requested At",
    "no_copy": 1,
    "read_only": 1
   }

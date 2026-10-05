@@ -1,6 +1,7 @@
 # Copyright (c) 2026, Malik AlZubaidi and Contributors
 # See license.txt
 
+from datetime import datetime
 from unittest.mock import patch
 
 import frappe
@@ -34,12 +35,25 @@ class TestBioTimeServer(BioTimeTestCase):
 		self.server.timezone = "Mars/Olympus"
 		self.assertRaises(frappe.ValidationError, self.server.save)
 
-	def test_import_now_tries_every_waiting_punch(self) -> None:
+	def test_import_now_asks_the_next_run_to_try_everything(self) -> None:
+		self.punch("2002", 8)
+		self.run_import()
+		(waiting,) = self.waiting()
+		self.enterContext(patch.object(punches, "_settings_changed_at", return_value=datetime(2000, 1, 1)))
+
 		with patch.object(frappe, "enqueue") as enqueue:
 			self.server.import_now()
 
 		self.assertEqual(enqueue.call_args.kwargs["server"], self.server.name)
-		self.assertTrue(enqueue.call_args.kwargs["retry_all"])
+		self.assertTrue(frappe.db.get_value("BioTime Server", self.server.name, "retry_requested_at"))
+		# Whichever run comes next, a queued scheduled one included, tries every waiting punch.
+		self.run_import()
+		self.assertGreater(self.waiting()[0].last_tried, waiting.last_tried)
+		self.assertFalse(self.server.retry_requested_at)
+
+	def test_import_now_needs_write_permission(self) -> None:
+		with self.set_user("Guest"):
+			self.assertRaises(frappe.PermissionError, self.server.import_now)
 
 	def test_start_over_reads_again_under_new_keys(self) -> None:
 		self.punch("1001", 8, id=101)
@@ -103,3 +117,12 @@ class TestBioTimeServer(BioTimeTestCase):
 
 		self.assertEqual(counts.already_there, 2)
 		self.assertEqual([w.emp_code for w in self.waiting()], ["9999"])
+
+	def test_start_over_saves_the_stored_server_not_the_form_copy(self) -> None:
+		self.server.company = "_Test Company"  # an edit the form never saved
+
+		with patch.object(frappe, "enqueue"):
+			self.server.start_over(str(DAY.date()))
+
+		self.assertFalse(frappe.db.get_value("BioTime Server", self.server.name, "company"))
+		self.assertEqual(frappe.db.get_value("BioTime Server", self.server.name, "key_generation"), 2)

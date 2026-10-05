@@ -157,14 +157,13 @@ def enqueue_imports() -> None:
 		enqueue_import(server)
 
 
-def enqueue_import(server: str, retry_all: bool = False) -> None:
+def enqueue_import(server: str) -> None:
 	frappe.enqueue(
 		"frappe_biotime.biotime.punches.import_punches",
 		queue="long",
 		job_id=f"biotime:import:{server}",
 		deduplicate=True,
 		server=server,
-		retry_all=retry_all,
 	)
 
 
@@ -178,9 +177,9 @@ def import_punches(server: str, retry_all: bool = False) -> ImportCounts | None:
 
 	Each punch becomes a checkin or waits as a BioTime Pending Punch. Waiting punches are
 	tried again when something they depend on changed, once a day, or every time when
-	`retry_all` is set. Returns the counts, or ``None`` when the run failed or another run
-	holds the lock. A failure is recorded on the server and in the Error Log; the read state
-	stays as it was, so the next run reads the same punches again.
+	`retry_all` is set or Import Now asked for it. Returns the counts, or ``None`` when the run
+	failed or another run holds the lock. A failure is recorded on the server and in the Error
+	Log; the read state stays as it was, so the next run reads the same punches again.
 	"""
 	lock = import_lock(server)
 	if not lock.acquire(blocking=False):
@@ -203,6 +202,8 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 	from frappe_biotime.biotime import watermark
 
 	counts = ImportCounts()
+	# Import Now asks through the server, so the request survives a run that is already queued.
+	requested = server.retry_requested_at
 	try:
 		with connection.connect(server) as client:
 			# Read before the punches: a terminal that reconnects after this read cannot
@@ -224,8 +225,10 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 		_save_status(
 			server.name, read_state=json.dumps(result.state), upload_order=result.state.get("upload_order")
 		)
-		retries = _retry_candidates(server, retry_all, started)
+		retries = _retry_candidates(server, retry_all or bool(requested), started)
 		store_punches(server, [Punch.from_waiting(row) for row in retries], counts, started)
+		if requested:
+			_clear_retry_request(server.name, requested)
 		waiting_now = _waiting_counts(server.name)
 		reach = watermark.reach(server, started, terminals, terminals_error)
 		_save_status(
@@ -256,6 +259,17 @@ def _fail(server: "BioTimeServer", started: datetime, message: str) -> None:
 		reference_name=server.name,
 	)
 	_save_status(server.name, last_run_at=started, last_run_result="Failed", last_run_message=message[:1000])
+
+
+def _clear_retry_request(server: str, requested: datetime) -> None:
+	"""Clear Import Now's request, unless it was made again during this run."""
+	table = DocType("BioTime Server")
+	(
+		frappe.qb.update(table)
+		.set(table.retry_requested_at, None)
+		.where((table.name == server) & (table.retry_requested_at == requested))
+		.run()
+	)
 
 
 def store_punches(

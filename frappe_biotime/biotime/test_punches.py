@@ -329,7 +329,6 @@ class TestPunchImport(BioTimeTestCase):
 		queued = [call.kwargs["server"] for call in enqueue.call_args_list]
 		self.assertEqual(queued, [self.server.name])
 		self.assertEqual(enqueue.call_args.kwargs["job_id"], f"biotime:import:{self.server.name}")
-		self.assertFalse(enqueue.call_args.kwargs["retry_all"])
 
 	def put_back_the_strict_setting(self) -> None:
 		"""Frappe HR 16 leaves the strict setting out of the shift its checkin validation reads,

@@ -109,7 +109,7 @@ function start_over(frm) {
 			{
 				fieldtype: "HTML",
 				options: `<p>${__(
-					"Use this after BioTime's database was restored or reinstalled. Imports read BioTime again from this date. Punches already in Frappe are recognized by their time and are not imported twice."
+					"Use this after BioTime's database was restored or reinstalled. Imports read BioTime again from this date: pick the day the restore lost data from, or a little earlier. Punches already in Frappe are recognized by their time and are not imported twice."
 				)}</p>`,
 			},
 			{
@@ -117,7 +117,11 @@ function start_over(frm) {
 				fieldtype: "Date",
 				label: __("Read Again From"),
 				reqd: 1,
-				default: frm.doc.import_from,
+				// Not Import From: reading everything since then can outlast the job's timeout.
+				default: frappe.datetime.add_days(
+					frappe.datetime.get_today(),
+					-(frm.doc.lookback_days || 3)
+				),
 			},
 		],
 		primary_action_label: __("Start Over"),
