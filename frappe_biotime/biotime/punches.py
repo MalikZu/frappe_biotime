@@ -1,8 +1,8 @@
 """Import BioTime punches into Employee Checkin.
 
 One run reads every punch that reached BioTime since the previous run, late uploads
-included, and stores each as a checkin keyed on ``<server>:<transaction id>``. A punch
-that cannot become a checkin yet is kept as a BioTime Pending Punch and tried again, so
+included, and stores each as a checkin keyed on ``<server>:<generation>:<transaction id>``.
+A punch that cannot become a checkin yet is kept as a BioTime Pending Punch and tried again, so
 no punch is dropped. The read state is saved only after the punches are committed, so a
 failed run repeats work instead of losing punches.
 """
@@ -21,7 +21,7 @@ from frappe.query_builder.functions import Count, Max
 from frappe.utils import add_to_date, get_datetime, get_system_timezone, getdate, now_datetime, strip_html
 from hrms.hr.doctype.employee_checkin.employee_checkin import CheckinRadiusExceededError
 from hrms.hr.doctype.shift_assignment.shift_assignment import get_actual_start_end_datetime_of_shift
-from pybiotime import Transaction
+from pybiotime import ReadStateError, Transaction
 from redis.exceptions import LockError
 from rq.timeouts import JobTimeoutException
 
@@ -36,6 +36,11 @@ BATCH_SIZE = 500
 RETRY_LIMIT = 5000
 #: How many unmapped employee codes the server record lists.
 MAX_LISTED_CODES = 50
+#: What a run reports when BioTime's transaction ids start over.
+RESTORED = (
+	"BioTime's transaction ids started over, as after a database restore or reinstall. "
+	"Use Actions > Start Over to read it again from a date."
+)
 #: The Shift Type setting under which Frappe HR refuses checkins without a log type.
 STRICT_LOG_TYPE = "Strictly based on Log Type in Employee Checkin"
 PENDING = "BioTime Pending Punch"
@@ -68,7 +73,7 @@ class Punch:
 		cls, server: "BioTimeServer", punch: Transaction, site_timezone: ZoneInfo
 	) -> "Punch":
 		return cls(
-			uid=f"{server.name}:{punch.id}",
+			uid=f"{server.name}:{server.key_generation or 1}:{punch.id}",
 			emp_code=punch.emp_code,
 			time=_site_time(punch.punch_time, site_timezone),
 			terminal_sn=punch.terminal_sn or "",
@@ -197,19 +202,10 @@ def _import(server: "BioTimeServer", retry_all: bool) -> ImportCounts | None:
 		store_punches(
 			server, [Punch.from_waiting(row) for row in _retry_candidates(server, retry_all)], counts
 		)
+	except ReadStateError as exc:
+		return _fail(server, started, f"{RESTORED} {exc}")
 	except Exception as exc:
-		frappe.log_error(
-			title=f"BioTime import failed for {server.name}",
-			reference_doctype=server.doctype,
-			reference_name=server.name,
-		)
-		_save_status(
-			server.name,
-			last_run_at=started,
-			last_run_result="Failed",
-			last_run_message=f"{type(exc).__name__}: {exc}"[:1000],
-		)
-		return None
+		return _fail(server, started, f"{type(exc).__name__}: {exc}")
 	waiting_now = _waiting_counts(server.name)
 	_save_status(
 		server.name,
@@ -221,6 +217,15 @@ def _import(server: "BioTimeServer", retry_all: bool) -> ImportCounts | None:
 		unmapped_codes=_unmapped_codes(server.name),
 	)
 	return counts
+
+
+def _fail(server: "BioTimeServer", started: datetime, message: str) -> None:
+	frappe.log_error(
+		title=f"BioTime import failed for {server.name}",
+		reference_doctype=server.doctype,
+		reference_name=server.name,
+	)
+	_save_status(server.name, last_run_at=started, last_run_result="Failed", last_run_message=message[:1000])
 
 
 def store_punches(server: "BioTimeServer", punches: list[Punch], counts: ImportCounts) -> None:

@@ -41,6 +41,7 @@ frappe.ui.form.on("BioTime Server", {
 					),
 				actions
 			);
+			frm.add_custom_button(__("Start Over"), () => start_over(frm), actions);
 		}
 		frm.add_custom_button(
 			__("Waiting Punches"),
@@ -57,3 +58,33 @@ frappe.ui.form.on("BioTime Server", {
 		);
 	},
 });
+
+function start_over(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Start Over"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				options: `<p>${__(
+					"Use this after BioTime's database was restored or reinstalled. Imports read BioTime again from this date. Punches already in Frappe are recognized by their time and are not imported twice."
+				)}</p>`,
+			},
+			{
+				fieldname: "from_date",
+				fieldtype: "Date",
+				label: __("Read Again From"),
+				reqd: 1,
+				default: frm.doc.import_from,
+			},
+		],
+		primary_action_label: __("Start Over"),
+		primary_action({ from_date }) {
+			frm.call("start_over", { from_date }).then(() => {
+				dialog.hide();
+				frappe.show_alert({ message: __("Import queued"), indicator: "blue" });
+				frm.reload_doc();
+			});
+		},
+	});
+	dialog.show();
+}

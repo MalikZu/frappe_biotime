@@ -1,16 +1,18 @@
 # Copyright (c) 2026, Malik AlZubaidi and contributors
 # For license information, please see license.txt
 
+import contextlib
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import get_system_timezone
+from frappe.utils import get_system_timezone, getdate
+from redis.exceptions import LockError
 
 from frappe_biotime.biotime import connection
-from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import
+from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import, import_lock
 
 
 class BioTimeServer(Document):
@@ -73,6 +75,30 @@ class BioTimeServer(Document):
 	def import_now(self) -> None:
 		"""Queue an import now, and try every waiting punch again."""
 		enqueue_import(self.name, retry_all=True)
+
+	@frappe.whitelist()
+	def start_over(self, from_date: str) -> None:
+		"""Read BioTime again from `from_date`, after its database was restored or reinstalled.
+
+		New transaction keys get the next generation, so they never match old ones. Punches
+		read again are recognized by their time.
+		"""
+		self.check_permission("write")
+		if not from_date:
+			frappe.throw(_("Choose the date to read BioTime again from."))
+		from_date = getdate(from_date)
+		lock = import_lock(self.name)
+		if not lock.acquire(blocking=False):
+			frappe.throw(_("An import is running. Try again in a minute."))
+		try:
+			self.key_generation = (self.key_generation or 1) + 1
+			self.read_state = None
+			self.import_from = from_date
+			self.save()
+		finally:
+			with contextlib.suppress(LockError):
+				lock.release()
+		enqueue_import(self.name)
 
 
 def _site_datetime(value: datetime | None) -> datetime | None:

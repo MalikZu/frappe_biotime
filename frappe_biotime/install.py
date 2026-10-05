@@ -24,7 +24,7 @@ CUSTOM_FIELDS = {
 			"fieldname": "biotime_uid",
 			"fieldtype": "Data",
 			"label": "BioTime Transaction",
-			"description": "Server and transaction id. Each BioTime punch is imported once.",
+			"description": "Server, key generation and transaction id. Each BioTime punch is imported once.",
 			"insert_after": "biotime_server",
 			"unique": 1,
 			"read_only": 1,

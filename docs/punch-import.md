@@ -75,6 +75,18 @@ Two kinds are counted in **Last Message** and not kept:
 - **Left out by this server's settings:** the terminal's **Import Punches** is off, or
   the employee belongs to another company than the server's **Company**.
 
+## After a BioTime restore
+
+When BioTime's database is restored from a backup or reinstalled, it gives new punches
+transaction ids it used before. The next import fails with a message that says so.
+
+1. Click **Actions > Start Over**.
+2. Pick the date to read BioTime again from: the day the restore lost data, or earlier.
+
+Imports then read again from that date. Punches already in Frappe are recognized by
+their time and are not imported twice. **Key Generation** in the Status section goes
+up by one, so new punches never match old ones.
+
 ## When an import fails
 
 An import fails only when BioTime cannot be read or the database fails. **Last
