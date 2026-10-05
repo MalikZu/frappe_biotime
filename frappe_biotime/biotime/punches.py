@@ -606,19 +606,29 @@ def _waiting_key(punch: Punch) -> tuple[str, datetime]:
 
 
 def _code_key(code: str | None) -> str:
-	"""A code as the database compares codes: case and trailing spaces do not count."""
+	"""A code as the database mostly compares codes: case and trailing spaces do not count."""
 	return (code or "").rstrip().casefold()
 
 
 def _employees_by_code(codes: set[str]) -> dict[str, Any]:
+	"""Employees by the `_code_key` of each code in `codes`, matched as the database matches."""
 	if not codes:
 		return {}
-	rows = frappe.get_all(
-		"Employee",
-		filters={"attendance_device_id": ["in", list(codes)]},
-		fields=["name", "attendance_device_id", "company", "status", "relieving_date"],
-	)
-	return {_code_key(row.attendance_device_id): row for row in rows}
+	fields = ["name", "attendance_device_id", "company", "status", "relieving_date"]
+	rows = frappe.get_all("Employee", filters={"attendance_device_id": ["in", list(codes)]}, fields=fields)
+	employees = {_code_key(row.attendance_device_id): row for row in rows}
+	keys = {_code_key(code) for code in codes}
+	if any(key not in keys for key in employees):
+		# The database matched a code that differs in more than case, such as one typed with
+		# Arabic digits: ask it which code that was.
+		for code in codes:
+			if _code_key(code) not in employees:
+				match = frappe.get_all(
+					"Employee", filters={"attendance_device_id": code}, fields=fields, limit=1
+				)
+				if match:
+					employees[_code_key(code)] = match[0]
+	return employees
 
 
 def _logged_times(mapped: list) -> set[tuple[str, datetime]]:
