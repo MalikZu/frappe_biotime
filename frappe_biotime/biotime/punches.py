@@ -214,6 +214,10 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 				start=datetime.combine(getdate(server.import_from), time.min) if server.import_from else None,
 				lookback=timedelta(days=server.lookback_days or 3),
 			)
+		# End the transaction the BioTime read kept open: under snapshot isolation, its first
+		# write would fail if another session changed that row meanwhile, such as a checkin's
+		# naming series.
+		frappe.db.commit()  # nosemgrep
 		site_timezone = ZoneInfo(get_system_timezone())
 		store_punches(
 			server,
