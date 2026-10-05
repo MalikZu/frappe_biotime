@@ -6,7 +6,8 @@ moves only forward, and only to the earliest time every server has fully importe
 a buffer.
 """
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +41,8 @@ class Reach:
 	#: Every punch from before this time is a checkin or waiting. None when unknown.
 	at: datetime | None
 	held_back_by: str
+	#: How far each terminal that holds attendance is in, for the next import to compare.
+	terminals: dict[str, str] = field(default_factory=dict)
 
 
 def read_terminals(client) -> tuple[list | None, str | None]:
@@ -79,7 +82,9 @@ def reach(
 	The earliest of: the import's start; the last contact of each terminal that holds
 	attendance, since an offline terminal may still hold punches; the newest late punch of a
 	terminal still uploading its backlog; and the oldest waiting punch that holds (see
-	_holding_punch).
+	_holding_punch). A terminal that moved on by more than the buffer since the previous
+	import holds where it was for one more import, since what it stored may still be on its
+	way: BioTime can see it back before its backlog arrives, or between two batches.
 	"""
 	if terminals is None:
 		return Reach(None, f"BioTime's terminals could not be read: {error}"[:140])
@@ -89,20 +94,30 @@ def reach(
 		row = rows.get(serial_number)
 		return row is None or bool(row.import_punches and row.holds_attendance)
 
-	candidates = [(started, "This import's start")]
+	points: dict[str, tuple[datetime, str]] = {}
 	for terminal in terminals:
 		if terminal.last_activity is None or not holds(terminal.sn):
 			continue
 		seen = site_time(terminal.last_activity)
-		candidates.append((seen, f"Terminal {terminal.sn}, last seen {format_datetime(seen)}"))
+		points[terminal.sn] = (seen, f"Terminal {terminal.sn}, last seen {format_datetime(seen)}")
 	for serial_number, punched in (backlogs or {}).items():
-		if holds(serial_number):
-			candidates.append(
-				(
-					punched,
-					f"Terminal {serial_number}, still uploading punches from {format_datetime(punched)}",
-				)
+		if holds(serial_number) and (serial_number not in points or punched < points[serial_number][0]):
+			points[serial_number] = (
+				punched,
+				f"Terminal {serial_number}, still uploading punches from {format_datetime(punched)}",
 			)
+	before = _terminal_reach(server)
+	# A smaller move is covered already: Last Sync stays the buffer behind.
+	gap = timedelta(minutes=server.attendance_buffer_minutes or 0)
+	candidates = [(started, "This import's start")]
+	for serial_number, (at, held_back_by) in points.items():
+		previous = before.get(serial_number)
+		if previous and at - previous > gap:
+			at = previous
+			held_back_by = (
+				f"Terminal {serial_number}, may still be uploading punches from {format_datetime(at)}"
+			)
+		candidates.append((at, held_back_by))
 	waiting = _holding_punch(server, started)
 	if waiting:
 		punched = get_datetime(waiting.punch_time)
@@ -110,7 +125,15 @@ def reach(
 			(punched, f"Waiting punch of {waiting.emp_code} at {format_datetime(punched)}: {waiting.reason}")
 		)
 	at, held_back_by = min(candidates, key=lambda candidate: candidate[0])
-	return Reach(at, held_back_by[:140])
+	return Reach(at, held_back_by[:140], {sn: str(point) for sn, (point, _why) in points.items()})
+
+
+def _terminal_reach(server: "BioTimeServer") -> dict[str, datetime]:
+	"""How far each terminal was in at the previous import."""
+	value = server.terminal_reach
+	if isinstance(value, str):
+		value = json.loads(value) if value.strip() else None
+	return {serial_number: get_datetime(at) for serial_number, at in (value or {}).items()}
 
 
 def _holding_punch(server: "BioTimeServer", started: datetime) -> Any:
