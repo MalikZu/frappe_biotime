@@ -13,9 +13,9 @@ It holds the current status, decisions and next step. `internal/` is not in git.
   `Employee Checkin` for punches, `Employee.attendance_device_id` for the
   BioTime `emp_code`, Shift Type auto-attendance for IN/OUT and shift boundaries,
   standard Department, Branch and Designation for masters.
-- **Few doctypes.** The design has one doctype (BioTime Server) and one child
-  table (BioTime Terminal). A new doctype needs a written reason in the design
-  doc first.
+- **Few doctypes.** The design has two doctypes (BioTime Server, and BioTime
+  Pending Punch for punches that wait) and one child table (BioTime Terminal).
+  A new doctype needs a written reason in the design doc first.
 - **Never lose or invent attendance.** Imports must catch late uploads and stay
   idempotent. Never move `Shift Type.last_sync_of_checkin` past what every
   server has fully imported; that creates false Absents.

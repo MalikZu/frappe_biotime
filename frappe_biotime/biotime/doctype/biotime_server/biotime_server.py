@@ -9,7 +9,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import get_system_timezone
 
-from frappe_biotime.biotime.connection import connect
+from frappe_biotime.biotime import connection
 from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import
 
 
@@ -44,7 +44,7 @@ class BioTimeServer(Document):
 	@frappe.whitelist()
 	def test_connection(self) -> dict:
 		"""Log in, and report what the server shows about its version."""
-		with connect(self) as client:
+		with connection.connect(self) as client:
 			info = client.server_info()
 		frappe.db.set_value(self.doctype, self.name, "detected_version", info.version, update_modified=False)
 		return {
@@ -56,7 +56,7 @@ class BioTimeServer(Document):
 	@frappe.whitelist()
 	def sync_terminals(self) -> int:
 		"""Add BioTime's terminals to the table and refresh their details. Returns the count."""
-		with connect(self) as client:
+		with connection.connect(self) as client:
 			terminals = list(client.terminals.list())
 		rows = {row.serial_number: row for row in self.terminals}
 		for terminal in terminals:
@@ -71,8 +71,8 @@ class BioTimeServer(Document):
 
 	@frappe.whitelist()
 	def import_now(self) -> None:
-		"""Queue an import now instead of waiting for the scheduler."""
-		enqueue_import(self.name)
+		"""Queue an import now, and try every waiting punch again."""
+		enqueue_import(self.name, retry_all=True)
 
 
 def _site_datetime(value: datetime | None) -> datetime | None:
