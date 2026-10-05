@@ -86,3 +86,20 @@ class TestBioTimeServer(BioTimeTestCase):
 		self.server.reload()
 		self.assertEqual(self.server.last_run_result, "Failed")
 		self.assertTrue(self.server.last_run_message.startswith(punches.RESTORED))
+
+	def test_start_over_does_not_duplicate_waiting_punches(self) -> None:
+		self.punch("9999", 8, id=101)
+		self.punch("1001", 9, id=102)
+		self.run_import()
+		# The employee is set Inactive later: their imported punch must not come back as waiting.
+		frappe.db.set_value("Employee", self.sara, "status", "Inactive")
+		self.fake = FakeBioTime()
+		self.punch("9999", 8, id=101)
+		self.punch("1001", 9, id=102)
+		with patch.object(frappe, "enqueue"):
+			self.server.start_over(str(DAY.date()))
+
+		counts = self.run_import()
+
+		self.assertEqual(counts.already_there, 2)
+		self.assertEqual([w.emp_code for w in self.waiting()], ["9999"])
