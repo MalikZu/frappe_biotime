@@ -67,7 +67,17 @@ frappe.ui.form.on("BioTime Server", {
 
 function attendance_notes(attendance) {
 	const list = (names) => names.map((name) => frappe.utils.escape_html(name)).join(", ");
+	const floor = attendance.floor
+		? frappe.datetime.str_to_user(attendance.floor)
+		: __("Import From");
 	const notes = [];
+	if (attendance.disabled_holding) {
+		notes.push(
+			__(
+				"This server is disabled, but attendance stays held at its Imported Up To, because its punches may still come. Untick Import Punches to release it."
+			)
+		);
+	}
 	if (attendance.waiting_for?.length) {
 		notes.push(
 			__("Attendance does not move until these servers have imported once: {0}.", [
@@ -86,16 +96,16 @@ function attendance_notes(attendance) {
 	if (attendance.not_started?.length) {
 		notes.push(
 			__(
-				"These shift types have no Last Sync of Checkin, so Frappe HR marks no attendance for them yet: {0}. Set it once to when their punches start in Frappe, and the app moves it from there.",
-				[list(attendance.not_started)]
+				"These shift types have no Last Sync of Checkin, so Frappe HR marks no attendance for them yet: {0}. Set Process Attendance After to {1} or later first, then Last Sync of Checkin. The app moves it from there.",
+				[list(attendance.not_started), floor]
 			)
 		);
 	}
 	if (attendance.behind?.length) {
 		notes.push(
 			__(
-				"The app leaves these shift types alone because their Last Sync of Checkin is before Import From ({1}), and moving it would mark those days Absent: {0}. Set it to {1} or later.",
-				[list(attendance.behind), frappe.datetime.str_to_user(attendance.floor)]
+				"The app leaves these shift types alone, because moving them would mark days before {1} Absent: {0}. Set their Process Attendance After to {1} or later.",
+				[list(attendance.behind), floor]
 			)
 		);
 	}
