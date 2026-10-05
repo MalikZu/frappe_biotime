@@ -56,9 +56,10 @@ frappe.ui.form.on("BioTime Server", {
 		const notes = attendance_notes(frm.doc.__onload?.attendance || {});
 		if (frm.doc.waiting_punches) {
 			notes.unshift(
-				__("{0} punches are waiting to become checkins. Each import tries them again.", [
-					frm.doc.waiting_punches,
-				])
+				__(
+					"{0} punches are waiting to become checkins. Imports try them again when something they depend on changes, and at least daily. Import Now tries all of them.",
+					[frm.doc.waiting_punches]
+				)
 			);
 		}
 		frm.set_intro(notes.join("<br>"), "orange");

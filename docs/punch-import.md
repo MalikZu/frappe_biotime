@@ -51,8 +51,9 @@ No punch is dropped. A punch that cannot become a checkin yet waits, with its re
 **Actions > Waiting Punches** lists them, and the form says how many there are.
 
 An import tries a waiting punch again when something it depends on changes, such as
-the employee, the server or the shift settings, and at least once a day. **Import
-Now** tries all of them. A punch that imports leaves the list.
+the employee, the server or the shift settings, and at least once a day. An Error is
+tried again after about 10 minutes. **Import Now** tries all of them. A punch that
+imports leaves the list.
 
 | Reason | What to do |
 |---|---|
@@ -63,15 +64,16 @@ Now** tries all of them. A punch that imports leaves the list.
 | No terminal coordinates | Add the terminal's **Latitude** and **Longitude**. |
 | Outside check-in radius | Check the terminal's coordinates and the shift location. |
 | Error | Read the punch's message and the Error Log. |
+| Left out by settings | The server's settings changed after it started waiting. Undo the change if it should count. |
 
 You can delete waiting punches you never want imported, such as visitors' codes.
 
 ## Punches that are not imported
 
-Two kinds are counted in **Last Message** and not kept:
+Two kinds of new punches are counted in **Last Message** and not kept:
 
-- **Already in Frappe:** the punch is already a checkin, or the employee already has a
-  checkin at that exact second.
+- **Already in Frappe:** the punch is already a checkin or waiting, or the employee
+  already has a checkin at that exact second.
 - **Left out by this server's settings:** the terminal's **Import Punches** is off, or
   the employee belongs to another company than the server's **Company**.
 
@@ -83,27 +85,42 @@ there. So after each import, the app moves it forward on every Shift Type with *
 Auto Attendance** on and **Auto Update Last Sync** off, but only as far as every server
 has imported:
 
-- Each server's **Imported Up To** is the earliest of the import's start, the last
-  contact of each terminal whose punches are imported, and the oldest waiting punch
-  younger than **Hold for Waiting Punches** (24 hours by default). **Held Back By** says
-  which one. A terminal that is offline may still hold punches, so it holds attendance.
-- Last Sync of Checkin then moves to the earliest Imported Up To of all enabled servers,
-  minus **Attendance Buffer** (60 minutes by default). It never moves back.
+- Each server's **Imported Up To** is the earliest of: the import's start; the last
+  contact of each terminal that holds attendance, since an offline terminal may still
+  have punches; the newest late punch of a terminal still uploading what it stored; and
+  the oldest waiting punch that holds. **Held Back By** says which one.
+- A refused punch or an Error holds attendance until it imports or you delete it. An
+  unknown device ID holds only while it is new: for **Hold for New Unknown Codes** (24
+  hours by default), and not at all for a code that has waited longer, such as a
+  visitor's. Inactive, After relieving date and Left out by settings never hold.
+- Last Sync of Checkin then moves to the earliest Imported Up To of all servers, minus
+  **Attendance Buffer** (60 minutes by default). It never moves back. A disabled server
+  keeps holding at its last Imported Up To, because its punches may still come: untick
+  its **Import Punches** to release it. Agent mode servers do not count yet.
 
-**Set Last Sync of Checkin once yourself**, to **Import From** or later. The app never
-starts a Shift Type, and leaves alone any whose last sync is earlier than Import From or
-that update it themselves. The server form lists those Shift Types.
+**Before attendance starts, set two fields on each Shift Type yourself:** first **Process
+Attendance After**, to **Import From** or later, then **Last Sync of Checkin**. Frappe HR
+marks Absent on every day from Process Attendance After that has no attendance, so an
+earlier date marks days before the import began Absent. With several servers, use the
+latest Import From. The app never starts a Shift Type, and leaves alone any it cannot
+move safely. The server form lists them.
 
-A terminal that is gone for good holds attendance until you untick its **Import Punches**.
-Waiting punches of inactive employees, or from after a relieving date, do not hold it.
+A terminal that is gone for good holds attendance until you untick its **Holds
+Attendance**. Do not untick Import Punches for that: its punches would then be left out,
+even ones it uploads if it comes back.
 
 ## After a BioTime restore
 
 When BioTime's database is restored from a backup or reinstalled, it gives new punches
-transaction ids it used before. The next import fails with a message that says so.
+transaction ids it used before. **Run Start Over after any restore.** The import notices
+a restore only when the ids go back far, as after a reinstall, and then fails with a
+message that says so. After a smaller restore, it cannot tell, and new punches that
+reuse old ids are missed until you run Start Over.
 
 1. Click **Actions > Start Over**.
-2. Pick the date to read BioTime again from: the day the restore lost data, or earlier.
+2. Pick the date to read BioTime again from: the day the restore lost data, or a little
+   earlier. It starts at today minus **Lookback**. Reading many months again can take
+   longer than one import may run.
 
 Imports then read again from that date. Punches already in Frappe are recognized by
 their time and are not imported twice. **Key Generation** in the Status section goes

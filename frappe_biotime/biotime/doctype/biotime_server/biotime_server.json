@@ -260,7 +260,7 @@
    "read_only": 1
   },
   {
-   "description": "Punches that could not become checkins yet. Each import tries them again.",
+   "description": "Punches that could not become checkins yet. Imports try them again when their employee, the server or shift settings change, and at least daily. Import Now tries all of them.",
    "fieldname": "waiting_punches",
    "fieldtype": "Int",
    "label": "Waiting Punches",
