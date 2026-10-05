@@ -97,7 +97,7 @@ function attendance_notes(attendance) {
 	if (attendance.not_started?.length) {
 		notes.push(
 			__(
-				"These shift types have no Last Sync of Checkin, so Frappe HR marks no attendance for them yet: {0}. Set Process Attendance After to {1} or later first, then Last Sync of Checkin. The app moves it from there.",
+				"These shift types have no Last Sync of Checkin, so Frappe HR marks no attendance for them yet: {0}. Set Process Attendance After to {1} or later first, then Last Sync of Checkin to the start of that day, not later. The app moves it from there.",
 				[list(attendance.not_started), floor]
 			)
 		);
