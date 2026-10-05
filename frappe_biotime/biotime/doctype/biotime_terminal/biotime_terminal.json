@@ -15,6 +15,7 @@
   "last_activity",
   "column_break_settings",
   "import_punches",
+  "holds_attendance",
   "direction",
   "latitude",
   "longitude"
@@ -68,6 +69,13 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Import Punches"
+  },
+  {
+   "default": "1",
+   "description": "Untick for a terminal that is gone for good, so it stops holding attendance. Unlike Import Punches, its punches still import if it comes back.",
+   "fieldname": "holds_attendance",
+   "fieldtype": "Check",
+   "label": "Holds Attendance"
   },
   {
    "description": "Log type for punches from this terminal, when the server's log type is set to Terminal direction.",

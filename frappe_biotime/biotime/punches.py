@@ -230,7 +230,8 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 		if requested:
 			_clear_retry_request(server.name, requested)
 		waiting_now = _waiting_counts(server.name)
-		reach = watermark.reach(server, started, terminals, terminals_error)
+		backlogs = watermark.backlogs(server, result.transactions)
+		reach = watermark.reach(server, started, terminals, terminals_error, backlogs)
 		_save_status(
 			server.name,
 			last_run_at=started,

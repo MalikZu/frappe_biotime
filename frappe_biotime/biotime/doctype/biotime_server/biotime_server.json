@@ -214,10 +214,10 @@
   },
   {
    "default": "24",
-   "description": "A waiting punch younger than this holds attendance back, so it can be fixed before Frappe HR marks that day.",
+   "description": "A waiting punch from a new unknown device ID holds attendance this long, so the code can be linked first. Refused punches and errors hold it until they import or are deleted.",
    "fieldname": "attendance_hold_hours",
    "fieldtype": "Int",
-   "label": "Hold for Waiting Punches (hours)",
+   "label": "Hold for New Unknown Codes (hours)",
    "non_negative": 1
   },
   {
