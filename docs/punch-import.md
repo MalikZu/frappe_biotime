@@ -102,9 +102,11 @@ has imported:
   its **Import Punches** to release it. Agent mode servers do not count yet.
 
 **Before attendance starts, set two fields on each Shift Type yourself:** first **Process
-Attendance After**, to **Import From** or later, then **Last Sync of Checkin**. Frappe HR
-marks Absent on every day from Process Attendance After that has no attendance, so an
-earlier date marks days before the import began Absent. With several servers, use the
+Attendance After**, to **Import From** or later, then **Last Sync of Checkin**, to the
+start of that same day. Frappe HR marks Absent on every day from Process Attendance After
+that has no attendance, so an earlier date marks days before the import began Absent. Do
+not set Last Sync of Checkin later, such as to now: Frappe HR would mark attendance before
+every punch is in, and the app only moves it forward. With several servers, use the
 latest Import From. The app never starts a Shift Type, and leaves alone any it cannot
 move safely. The server form lists them.
 
