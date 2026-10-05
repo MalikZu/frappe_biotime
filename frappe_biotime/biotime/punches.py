@@ -11,7 +11,7 @@ import contextlib
 import json
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
@@ -204,6 +204,7 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 	counts = ImportCounts()
 	# Import Now asks through the server, so the request survives a run that is already queued.
 	requested = server.retry_requested_at
+	state = _read_state(server)
 	try:
 		site_timezone = ZoneInfo(get_system_timezone())
 		with connection.connect(server) as client:
@@ -211,7 +212,7 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 			# move the watermark past punches it uploads later.
 			terminals, terminals_error = watermark.read_terminals(client)
 			result = client.transactions.read_new(
-				_read_state(server),
+				state,
 				start=_start(server, site_timezone),
 				lookback=timedelta(days=server.lookback_days or 3),
 			)
@@ -227,7 +228,10 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 		)
 		# Every new punch is now a checkin or waiting, so the next run can start after them.
 		_save_status(
-			server.name, read_state=json.dumps(result.state), upload_order=result.state.get("upload_order")
+			server.name,
+			read_state=json.dumps(result.state),
+			upload_order=result.state.get("upload_order"),
+			**({"imported_from": _imported_from(server)} if state is None and server.import_from else {}),
 		)
 		retries = _retry_candidates(server, retry_all or bool(requested), started)
 		store_punches(server, [Punch.from_waiting(row) for row in retries], counts, started)
@@ -264,6 +268,16 @@ def _start(server: "BioTimeServer", site_timezone: ZoneInfo) -> datetime | None:
 	start = datetime.combine(getdate(server.import_from), time.min)
 	# pybiotime moves an aware time into BioTime's timezone, which it knows only when it is set.
 	return start.replace(tzinfo=site_timezone) if server.timezone else start
+
+
+def _imported_from(server: "BioTimeServer") -> date:
+	"""After a first read: the date every punch is read from, which attendance never moves before.
+
+	Start Over from a later date keeps the earlier one, since the punches before its date were
+	imported before the restore.
+	"""
+	read_from = getdate(server.import_from)
+	return min(read_from, getdate(server.imported_from)) if server.imported_from else read_from
 
 
 def _fail(server: "BioTimeServer", started: datetime, message: str) -> None:

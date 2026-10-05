@@ -2,6 +2,7 @@
 # See license.txt
 
 from datetime import date, datetime, timedelta
+from unittest.mock import patch
 
 import frappe
 from erpnext.setup.doctype.employee.test_employee import make_employee
@@ -145,6 +146,35 @@ class TestAttendanceWatermark(BioTimeTestCase):
 
 		self.assertEqual(self.last_sync(shift), datetime(2026, 5, 1))
 		self.assertEqual(watermark.notes(self.server)["floor"], "2026-10-01")
+
+	def test_editing_import_from_later_keeps_the_floor(self) -> None:
+		behind = self.shift(
+			"_Test BioTime Behind", last_sync=datetime(2026, 9, 1), process_attendance_after=date(2026, 9, 1)
+		)
+		self.run_import()
+		self.assertEqual(self.server.imported_from, date(2026, 10, 1))
+		# Nothing from September is read again: the import goes on from where it was.
+		self.server.import_from = date(2026, 9, 1)
+		self.server.save()
+
+		self.run_import()
+
+		self.assertEqual(self.last_sync(behind), datetime(2026, 9, 1))
+		self.assertEqual(watermark.notes(self.server)["floor"], "2026-10-01")
+
+	def test_start_over_from_a_later_date_keeps_the_floor(self) -> None:
+		self.run_import()
+		# Held back before the restore, by a terminal that was offline for a while.
+		held = datetime(2026, 10, 2, 8, 0)
+		shift = self.shift("_Test BioTime Day", last_sync=held, process_attendance_after=date(2026, 9, 1))
+		with patch.object(frappe, "enqueue"):
+			self.server.start_over("2026-10-03")
+
+		self.run_import()
+
+		# The punches before the new date were imported before the restore.
+		self.assertEqual(watermark.notes(self.server)["floor"], "2026-10-01")
+		self.assertGreater(self.last_sync(shift), held)
 
 	@HRMSTestSuite.change_settings("HR Settings", {"allow_geolocation_tracking": 1})
 	def test_refusals_hold_attendance_until_resolved(self) -> None:
