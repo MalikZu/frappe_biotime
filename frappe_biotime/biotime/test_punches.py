@@ -397,6 +397,31 @@ class TestPunchImport(BioTimeTestCase):
 		self.assertEqual(counts.from_waiting, 1)
 		self.assertEqual(self.waiting(), [])
 
+	@HRMSTestSuite.change_settings("HR Settings", {"allow_geolocation_tracking": 1})
+	def test_refusals_are_named_by_what_frappe_hr_checked(self) -> None:
+		# As in Frappe HR 16.16: the shift it checks lacks the strict setting, so it does not
+		# refuse the blank log type, and the real refusal is the missing coordinates.
+		get_shift_type = shift_assignment.get_shift_type
+
+		def without_strict_setting(name):
+			shift_type = get_shift_type(name)
+			shift_type.pop("determine_check_in_and_check_out", None)
+			return shift_type
+
+		self.enterContext(patch.object(shift_assignment, "get_shift_type", without_strict_setting))
+		shift = setup_shift_type(
+			shift_type="_Test BioTime Strict",
+			start_time="07:00:00",
+			end_time="16:00:00",
+			determine_check_in_and_check_out=punches.STRICT_LOG_TYPE,
+		)
+		make_shift_assignment(shift.name, self.sara, DAY.date())
+		self.punch("1001", 8)
+
+		self.run_import()
+
+		self.assertEqual([w.reason for w in self.waiting()], [punches.NO_LOCATION])
+
 	def test_codes_match_whatever_their_case(self) -> None:
 		make_employee("biotime.case@example.com", company="_Test Company", attendance_device_id="ab12")
 		self.punch("AB12", 8)
