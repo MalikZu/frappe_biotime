@@ -250,7 +250,11 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 			unmapped_codes=_unmapped_codes(server.name),
 			held_back_by=reach.held_back_by,
 			# Unknown this run: keep the last known reach.
-			**({"imported_up_to": reach.at} if reach.at else {}),
+			**(
+				{"imported_up_to": reach.at, "terminal_reach": json.dumps(reach.terminals)}
+				if reach.at
+				else {}
+			),
 		)
 		watermark.move_shift_types()
 		frappe.db.commit()

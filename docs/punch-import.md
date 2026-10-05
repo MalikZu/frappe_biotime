@@ -88,7 +88,9 @@ has imported:
 - Each server's **Imported Up To** is the earliest of: the import's start; the last
   contact of each terminal that holds attendance, since an offline terminal may still
   have punches; the newest late punch of a terminal still uploading what it stored; and
-  the oldest waiting punch that holds. **Held Back By** says which one.
+  the oldest waiting punch that holds. **Held Back By** says which one. A terminal that
+  moved on by more than **Attendance Buffer** since the last import holds where it was for
+  one more import, since what it stored may still be on its way.
 - A refused punch or an Error holds attendance until it imports or you delete it. An
   unknown device ID holds only while it is new: for **Hold for New Unknown Codes** (24
   hours by default) after an import first finds it, however old its punches are, and

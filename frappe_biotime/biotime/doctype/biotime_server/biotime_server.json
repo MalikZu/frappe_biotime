@@ -51,7 +51,8 @@
   "unmapped_codes",
   "last_run_message",
   "read_state",
-  "retry_requested_at"
+  "retry_requested_at",
+  "terminal_reach"
  ],
  "fields": [
   {
@@ -345,6 +346,14 @@
    "fieldtype": "Datetime",
    "hidden": 1,
    "label": "Retry Requested At",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "terminal_reach",
+   "fieldtype": "JSON",
+   "hidden": 1,
+   "label": "Terminal Reach",
    "no_copy": 1,
    "read_only": 1
   }

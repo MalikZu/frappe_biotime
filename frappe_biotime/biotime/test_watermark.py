@@ -224,6 +224,23 @@ class TestAttendanceWatermark(BioTimeTestCase):
 
 		self.assertEqual(self.server.held_back_by, "This import's start")
 
+	def test_a_terminal_back_online_holds_one_more_import(self) -> None:
+		door = self.fake.add_terminal(sn="DOOR000001", last_activity="2026-10-03 18:00:00")
+		self.run_import()
+		# BioTime sees it back, but what it stored while offline has not arrived yet.
+		back = now_datetime().replace(microsecond=0)
+		door["last_activity"] = back.strftime("%Y-%m-%d %H:%M:%S")
+
+		self.run_import()
+
+		self.assertEqual(self.server.imported_up_to, datetime(2026, 10, 3, 18, 0))
+		self.assertIn("may still be uploading", self.server.held_back_by)
+
+		# Nothing late arrived for a whole import: the hold ends.
+		self.run_import()
+
+		self.assertEqual(self.server.imported_up_to, back)
+
 	def test_terminals_that_do_not_hold_attendance(self) -> None:
 		self.fake.add_terminal(sn="DOOR000001", last_activity="2026-10-03 18:00:00")
 		self.server.append("terminals", {"serial_number": "DOOR000001", "holds_attendance": 0})
