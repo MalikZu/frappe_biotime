@@ -59,12 +59,22 @@ class TestAttendanceWatermark(BioTimeTestCase):
 		frappe.db.set_value("Employee", idle, "status", "Inactive")
 		recent = now_datetime().replace(microsecond=0) - timedelta(hours=2)
 		self.fake.add_transaction(emp_code="1004", punch_time=recent, terminal_sn=GATE)
-		self.punch("9999", 8)  # days ago, older than the 24-hour hold
+		self.punch("9999", 8)
+		self.run_import()
+		self.stored_long_ago("9999")
 
 		self.run_import()
 
 		self.assertEqual(len(self.waiting()), 2)
 		self.assertEqual(self.server.held_back_by, "This import's start")
+
+	def test_a_new_unknown_code_holds_however_old_its_punches(self) -> None:
+		self.punch("9999", 8)  # days ago, but stored only now: a new hire's first upload
+
+		self.run_import()
+
+		self.assertEqual(self.server.imported_up_to, DAY.replace(hour=8))
+		self.assertIn("9999", self.server.held_back_by)
 
 	def test_attendance_waits_for_every_server(self) -> None:
 		shift = self.shift("_Test BioTime Day", last_sync=IMPORT_FROM)
@@ -186,8 +196,10 @@ class TestAttendanceWatermark(BioTimeTestCase):
 		self.assertEqual(self.server.imported_up_to, DAY.replace(hour=10))
 
 	def test_unknown_codes_seen_before_do_not_hold_attendance(self) -> None:
+		self.punch("9999", 8)
+		self.run_import()
+		self.stored_long_ago("9999")  # the code has waited a while, like a visitor's
 		recent = now_datetime().replace(microsecond=0) - timedelta(hours=2)
-		self.punch("9999", 8)  # days ago: the code has waited a while, like a visitor's
 		self.fake.add_transaction(emp_code="9999", punch_time=recent, terminal_sn=GATE)
 
 		self.run_import()
@@ -255,6 +267,12 @@ class TestAttendanceWatermark(BioTimeTestCase):
 
 		self.assertGreater(self.last_sync(shift), IMPORT_FROM)
 		self.assertEqual(frappe.db.get_value("Shift Type", shift, "modified"), modified)
+
+	def stored_long_ago(self, emp_code: str) -> None:
+		"""Make the waiting punches of `emp_code` look stored two days ago."""
+		frappe.db.set_value(
+			punches.PENDING, {"emp_code": emp_code}, "creation", add_to_date(now_datetime(), days=-2)
+		)
 
 	def other_server(self, name: str, imported_up_to: datetime | None = None, **fields) -> str:
 		server = frappe.get_doc(

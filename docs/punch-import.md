@@ -91,8 +91,9 @@ has imported:
   the oldest waiting punch that holds. **Held Back By** says which one.
 - A refused punch or an Error holds attendance until it imports or you delete it. An
   unknown device ID holds only while it is new: for **Hold for New Unknown Codes** (24
-  hours by default), and not at all for a code that has waited longer, such as a
-  visitor's. Inactive, After relieving date and Left out by settings never hold.
+  hours by default) after an import first finds it, however old its punches are, and
+  not at all for a code that has waited longer, such as a visitor's. Inactive, After
+  relieving date and Left out by settings never hold.
 - Last Sync of Checkin then moves to the earliest Imported Up To of all servers, minus
   **Attendance Buffer** (60 minutes by default). It never moves back. A disabled server
   keeps holding at its last Imported Up To, because its punches may still come: untick
