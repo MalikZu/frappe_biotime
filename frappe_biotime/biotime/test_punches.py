@@ -90,6 +90,8 @@ class TestPunchImport(BioTimeTestCase):
 		frappe.db.set_value(
 			punches.PENDING, waiting.name, "last_tried", add_to_date(waiting.last_tried, days=-2)
 		)
+		# Only the daily rule can pick it up: nothing it depends on changed since.
+		self.enterContext(patch.object(punches, "_settings_changed_at", return_value=datetime(2000, 1, 1)))
 
 		self.run_import()
 
@@ -349,6 +351,32 @@ class TestPunchImport(BioTimeTestCase):
 		self.run_import()
 
 		self.assertEqual(self.waiting()[0].verify_type, 0)
+
+	def test_waiting_punches_carry_the_runs_stamp(self) -> None:
+		self.punch("2002", 8)
+
+		self.run_import()
+
+		self.assertEqual(self.waiting()[0].last_tried, self.server.last_run_at)
+
+	def test_error_punches_are_tried_again_soon(self) -> None:
+		with patch.object(EmployeeCheckin, "validate", side_effect=RuntimeError("lock wait timeout")):
+			self.punch("1001", 9)
+			self.run_import()
+		(waiting,) = self.waiting()
+		self.assertEqual(waiting.reason, punches.ERROR)
+		# Only the error rule can pick it up: nothing it depends on changed since.
+		self.enterContext(patch.object(punches, "_settings_changed_at", return_value=datetime(2000, 1, 1)))
+		frappe.db.set_value("Employee", self.sara, "modified", datetime(2000, 1, 1), update_modified=False)
+
+		self.run_import()
+		self.assertEqual(self.waiting()[0].last_tried, waiting.last_tried)
+
+		earlier = add_to_date(waiting.last_tried, minutes=-(punches.ERROR_RETRY_MINUTES + 1))
+		frappe.db.set_value(punches.PENDING, waiting.name, "last_tried", earlier)
+		counts = self.run_import()
+
+		self.assertEqual(counts.from_waiting, 1)
 
 	def test_waiting_punches_stay_when_the_settings_now_leave_them_out(self) -> None:
 		self.punch("2002", 8)
