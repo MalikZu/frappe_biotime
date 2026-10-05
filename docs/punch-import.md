@@ -45,28 +45,41 @@ leave the log type blank. The form warns you when it is.
 - Each punch is imported once. The checkin's BioTime section shows where it came from.
 - The **Status** section shows the last import's time, result, count and message.
 
-## Skipped punches
+## Waiting punches
 
-Some punches cannot become checkins. They are skipped and counted in **Last Message**:
+No punch is dropped. A punch that cannot become a checkin yet waits, with its reason.
+**Actions > Waiting Punches** lists them, and the form says how many there are.
+
+An import tries a waiting punch again when something it depends on changes, such as
+the employee, the server or the shift settings, and at least once a day. **Import
+Now** tries all of them. A punch that imports leaves the list.
 
 | Reason | What to do |
 |---|---|
-| No employee with that attendance device ID | Set the employee's Attendance Device ID. The codes are listed in **Unmapped Employee Codes**. |
-| Employee of another company | Nothing, or clear the server's **Company**. |
-| Terminal not imported | Tick the terminal's **Import Punches**. |
-| Employee inactive, or punch after the relieving date | Nothing. |
-| Already imported, or same time already logged | Nothing. The checkin exists. |
-| No log type in a shift that needs one | Map punch states or set terminal directions. |
-| Terminal has no coordinates and geolocation tracking is on | Add the terminal's **Latitude** and **Longitude**. |
-| Outside the shift location's check-in radius | Check the terminal's coordinates and the shift location. |
+| Unknown device ID | Set the employee's Attendance Device ID. **Unmapped Employee Codes** lists the codes. |
+| Inactive employee | Set the employee to Active if the punch should count. |
+| After relieving date | Correct the relieving date if it is wrong. |
+| Log type required | Map punch states or set terminal directions. |
+| No terminal coordinates | Add the terminal's **Latitude** and **Longitude**. |
+| Outside check-in radius | Check the terminal's coordinates and the shift location. |
+| Error | Read the punch's message and the Error Log. |
 
-**Skipped punches are not retried.** They stay in BioTime, but a later import does
-not read them again. Set Attendance Device IDs before new employees start punching.
+You can delete waiting punches you never want imported, such as visitors' codes.
+
+## Punches that are not imported
+
+Two kinds are counted in **Last Message** and not kept:
+
+- **Already in Frappe:** the punch is already a checkin, or the employee already has a
+  checkin at that exact second.
+- **Left out by this server's settings:** the terminal's **Import Punches** is off, or
+  the employee belongs to another company than the server's **Company**.
 
 ## When an import fails
 
-**Last Result** shows Failed, **Last Message** shows why, and an Error Log is saved.
-The next import reads the same punches again, so none are lost.
+An import fails only when BioTime cannot be read or the database fails. **Last
+Result** shows Failed, **Last Message** shows why, and an Error Log is saved. The
+next import reads the same punches again, so none are lost.
 
 One import must finish within the long queue's job timeout, 25 minutes by default.
 For the first import, keep **Import From** recent.
