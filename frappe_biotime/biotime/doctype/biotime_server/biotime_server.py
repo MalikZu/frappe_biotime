@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import getdate
+from frappe.utils import getdate, now_datetime
 from redis.exceptions import LockError
 
 from frappe_biotime.biotime import connection, watermark
@@ -60,6 +60,8 @@ class BioTimeServer(Document):
 	@frappe.whitelist()
 	def sync_terminals(self) -> int:
 		"""Add BioTime's terminals to the table and refresh their details. Returns the count."""
+		# Start from the stored record: the browser's copy may hold stale status and read state.
+		self.reload()
 		with connection.connect(self) as client:
 			terminals = list(client.terminals.list())
 		rows = {row.serial_number: row for row in self.terminals}
@@ -75,8 +77,15 @@ class BioTimeServer(Document):
 
 	@frappe.whitelist()
 	def import_now(self) -> None:
-		"""Queue an import now, and try every waiting punch again."""
-		enqueue_import(self.name, retry_all=True)
+		"""Queue an import now, and ask it to try every waiting punch again."""
+		self.check_permission("write")
+		# Asked through the server: a run that is already queued would drop a new job's arguments.
+		frappe.db.set_value(
+			self.doctype, self.name, "retry_requested_at", now_datetime(), update_modified=False
+		)
+		# Committed before queueing, so a run that starts at once sees the request.
+		frappe.db.commit()  # nosemgrep
+		enqueue_import(self.name)
 
 	@frappe.whitelist()
 	def start_over(self, from_date: str) -> None:
@@ -93,10 +102,14 @@ class BioTimeServer(Document):
 		if not lock.acquire(blocking=False):
 			frappe.throw(_("An import is running. Try again in a minute."))
 		try:
+			# Start from the stored record, not the browser's copy with its stale status.
+			self.reload()
 			self.key_generation = (self.key_generation or 1) + 1
 			self.read_state = None
 			self.import_from = from_date
 			self.save()
+			# Committed while the lock is held, so the queued run cannot read the old state.
+			frappe.db.commit()  # nosemgrep
 		finally:
 			with contextlib.suppress(LockError):
 				lock.release()
