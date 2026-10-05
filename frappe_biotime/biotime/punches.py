@@ -205,20 +205,20 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 	# Import Now asks through the server, so the request survives a run that is already queued.
 	requested = server.retry_requested_at
 	try:
+		site_timezone = ZoneInfo(get_system_timezone())
 		with connection.connect(server) as client:
 			# Read before the punches: a terminal that reconnects after this read cannot
 			# move the watermark past punches it uploads later.
 			terminals, terminals_error = watermark.read_terminals(client)
 			result = client.transactions.read_new(
 				_read_state(server),
-				start=datetime.combine(getdate(server.import_from), time.min) if server.import_from else None,
+				start=_start(server, site_timezone),
 				lookback=timedelta(days=server.lookback_days or 3),
 			)
 		# End the transaction the BioTime read kept open: under snapshot isolation, its first
 		# write would fail if another session changed that row meanwhile, such as a checkin's
 		# naming series.
 		frappe.db.commit()  # nosemgrep
-		site_timezone = ZoneInfo(get_system_timezone())
 		store_punches(
 			server,
 			[Punch.from_transaction(server, t, site_timezone) for t in result.transactions],
@@ -255,6 +255,15 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 	except Exception as exc:
 		return _fail(server, started, f"{type(exc).__name__}: {exc}")
 	return counts
+
+
+def _start(server: "BioTimeServer", site_timezone: ZoneInfo) -> datetime | None:
+	"""Where a first read starts: midnight of Import From on this site's clock."""
+	if not server.import_from:
+		return None
+	start = datetime.combine(getdate(server.import_from), time.min)
+	# pybiotime moves an aware time into BioTime's timezone, which it knows only when it is set.
+	return start.replace(tzinfo=site_timezone) if server.timezone else start
 
 
 def _fail(server: "BioTimeServer", started: datetime, message: str) -> None:
