@@ -6,9 +6,13 @@ Connects Frappe HR to ZKTeco BioTime.
 >
 > This is an unofficial integration. It is not affiliated with or endorsed by ZKTeco.
 
+## What works
+
+- Import punches from one or more BioTime servers into Employee Checkin. See
+  [Punch import](docs/punch-import.md).
+
 ## Planned
 
-- Import punches from one or more BioTime servers into Employee Checkin.
 - Let Frappe HR's shift auto-attendance turn those punches into attendance.
 - Push employees, with their department, branch and designation, to BioTime.
 - A report that matches BioTime people to Frappe employees.
