@@ -524,10 +524,9 @@ def _refusal(checkin, exc: Exception) -> str | None:
 		return OUTSIDE_RADIUS
 	if not checkin.log_type and not checkin.skip_auto_attendance:
 		shift = get_actual_start_end_datetime_of_shift(checkin.employee, checkin.time, True)
-		# Read from the record: Frappe HR 16 leaves this setting out of the shift it returns.
-		if shift and STRICT_LOG_TYPE == frappe.get_cached_value(
-			"Shift Type", shift.shift_type.name, "determine_check_in_and_check_out"
-		):
+		# Frappe HR refuses only when the shift it loaded carries the setting: Frappe HR 16.16
+		# leaves it out, so it never refuses there, and the real refusal is named below.
+		if shift and shift.shift_type.get("determine_check_in_and_check_out") == STRICT_LOG_TYPE:
 			return LOG_TYPE_REQUIRED
 	if not (checkin.latitude or checkin.longitude) and frappe.db.get_single_value(
 		"HR Settings", "allow_geolocation_tracking"
