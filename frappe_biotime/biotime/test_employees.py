@@ -6,7 +6,8 @@ from unittest.mock import patch
 import frappe
 from erpnext.setup.doctype.employee.test_employee import make_employee
 from frappe.utils import add_days, today
-from pybiotime import TransportError
+from pybiotime import BadRequestError, TransportError
+from pybiotime._sync.personnel import Areas
 from pybiotime.testing import _personnel as fake_personnel
 
 from frappe_biotime.biotime import employees
@@ -198,38 +199,84 @@ class TestEmployeePush(BioTimeTestCase):
 		self.server.reload()
 		self.assertIn("cannot resign", self.server.last_push_message)
 
-	def test_a_changed_code_never_makes_a_second_person(self) -> None:
+	def test_a_changed_code_waits_until_biotime_has_it(self) -> None:
 		employees.push_employee(self.sara)
-		self.save(self.sara, attendance_device_id="1002")
+		# A new code and a new name in one save: still the same person in BioTime.
+		self.save(self.sara, attendance_device_id="1002", last_name="Haddad")
 
 		employees.push_employee(self.sara)
 
-		# BioTime 9.5 keeps codes: the person stays under the old one, and the server says so.
-		self.assertEqual([person["emp_code"] for person in self.fake.employees], ["1001"])
+		self.assertEqual(self.names(), {"1001": "biotime.sara@example.com"})
 		self.server.reload()
-		self.assertIn("did not change it to 1002", self.server.last_push_message)
+		self.assertIn("change their code to 1002 in BioTime", self.server.last_push_message)
 
-		# Where BioTime changes codes, the same person gets the new one.
-		with patch.dict(fake_personnel._FIXED_ON_UPDATE, clear=True):
+		# HR changes the code in BioTime, so the fingerprints stay with her.
+		self.fake.employees[0]["emp_code"] = "1002"
+		employees.push_employee(self.sara)
+
+		(person,) = self.fake.employees
+		self.assertEqual((person["emp_code"], person["last_name"]), ("1002", "Haddad"))
+
+	def test_a_corrected_code_never_takes_over_the_other_person(self) -> None:
+		# 2005 in BioTime is a contractor. Sara gets it by mistake, and her push renames him.
+		self.person("2005", "Zaid", "Odeh")
+		self.save(self.sara, attendance_device_id="2005")
+		employees.push_employee(self.sara)
+		self.save(self.sara, attendance_device_id="2050")
+
+		employees.push_employee(self.sara)
+
+		# The app changes no code, so the contractor keeps his: HR fixes the rest in BioTime.
+		self.assertEqual(list(self.names()), ["2005"])
+		self.server.reload()
+		self.assertIn("add 2050 there", self.server.last_push_message)
+
+		self.person("2050", "Sara")
+		employees.push_employee(self.sara)
+
+		self.assertEqual(sorted(self.names()), ["2005", "2050"])
+
+	def test_two_pushes_creating_the_same_area_both_succeed(self) -> None:
+		def created_meanwhile(resource, code, name, **kwargs):
+			# Another push creates the area between this one's lookup and its create.
+			self.fake.add_area(code=code, name=name)
+			raise BadRequestError(
+				"area with this area_code already exists.",
+				field_errors={"area_code": ["area with this area_code already exists."]},
+				status_code=400,
+				method="POST",
+				path=Areas.path,
+			)
+
+		with patch.object(Areas, "upsert", created_meanwhile):
 			employees.push_employee(self.sara)
 
-		self.assertEqual([person["emp_code"] for person in self.fake.employees], ["1002"])
+		(person,) = self.fake.employees
+		self.assertEqual([self.code("areas", area) for area in person["area"]], ["_Test BioTime Gate"])
 
-	def test_an_old_code_counts_only_for_a_person_with_the_employees_name(self) -> None:
-		# Sara got 1001 by mistake: in BioTime it is a contractor's, with no Frappe employee.
-		self.person("1001", "Zaid", "Odeh")
-		self.save(self.sara, attendance_device_id="1002")
+	def test_a_failed_status_write_never_stops_the_push(self) -> None:
+		branch = frappe.get_doc(
+			{
+				"doctype": "BioTime Server",
+				"server_name": "_Test BioTime Branch",
+				"url": "http://branch.test",
+				"push_employees": 1,
+			}
+		).insert()
+		save_status = employees._save_status
 
-		employees.push_employee(self.sara)
+		def lock_wait_on_the_first(server, **values) -> None:
+			if server == self.server.name:
+				raise RuntimeError("Lock wait timeout exceeded")
+			save_status(server, **values)
 
-		self.assertEqual(self.names(), {"1001": "Zaid", "1002": "biotime.sara@example.com"})
+		with (
+			patch.object(employees, "_save_status", side_effect=lock_wait_on_the_first),
+			patch.object(frappe.db, "rollback"),
+		):
+			employees.push_employee(self.sara)
 
-		# Leaving goes by the current code only: the contractor stays.
-		self.server.db_set("on_employee_left", employees.DELETE)
-		self.set(self.sara, status="Left", relieving_date=DAY.date())
-		employees.push_employee(self.sara)
-
-		self.assertEqual(self.names(), {"1001": "Zaid"})
+		self.assertTrue(frappe.db.get_value("BioTime Server", branch.name, "last_push_message"))
 
 	def test_an_employee_still_changing_after_the_last_round_is_pushed_again(self) -> None:
 		def save_meanwhile(server, doc) -> None:
@@ -305,6 +352,15 @@ class TestEmployeePush(BioTimeTestCase):
 		push.assert_called_once()
 		self.server.reload()
 		self.assertIn("could not be reached", self.server.last_push_message)
+
+	def test_a_push_all_part_on_a_server_that_stopped_pushing_says_so(self) -> None:
+		self.server.db_set("push_employees", 0)
+
+		employees.push_all(self.server.name, after=self.sara, counts={"created in BioTime": 3})
+
+		self.server.reload()
+		self.assertIn("no longer pushes", self.server.last_push_message)
+		self.assertNotIn("Still running", self.server.last_push_message)
 
 	def test_push_all_needs_an_enabled_server_that_pushes(self) -> None:
 		self.server.db_set("enabled", 0)

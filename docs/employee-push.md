@@ -24,8 +24,9 @@ With **Company** set on the server, only that company's employees are pushed.
 ## What is pushed
 
 - Only employees with an **Attendance Device ID**. It is their code in BioTime. A code typed
-  with Arabic or other digits reaches BioTime in digits 0-9, and an existing person is found
-  whatever the case or digits, as the punch import matches codes.
+  with Arabic or other digits reaches BioTime in digits 0-9. An existing person is found under
+  the code as typed, in digits 0-9, in capitals or in small letters. A BioTime code in mixed
+  case, such as Emp7 for EMP7, is not found: give the employee BioTime's spelling.
 - Their first and middle names as BioTime's first name, and their last name.
 - Their department, area and position. One missing in BioTime is created, with the Frappe
   name as its code. An empty Last Name, or an empty Designation with Position From set to
@@ -64,14 +65,16 @@ Push All Employees applies this to employees who left before, too.
 
 ## A changed Attendance Device ID
 
-The push looks for the person in BioTime under the employee's old code, and changes the code.
-The person found must carry the employee's name: after a typo or a wrong link, the old code
-belongs to someone else, and the employee gets a new person under the new code instead.
+The app never changes a code in BioTime. When an employee's code changes and BioTime has
+no one under the new code but someone under an earlier one, nothing is pushed for them, and
+**Last Push Message** says so. Only HR can tell who that person is:
 
-BioTime 9.5 does not change codes through its API: the person then keeps the old code, and
-**Last Push Message** says so. Change the code in BioTime, or set the Attendance Device ID
-back. No second person is created for them, because terminals would keep sending the old
-code.
+- If it is the employee, change their code in BioTime. Their fingerprints stay with them,
+  and terminals send the new code.
+- If it is someone else, as after a typo or a wrong link, add the new code in BioTime.
+
+The next push then brings the employee's copy up to date. A second person is never created
+for the employee, because terminals would keep sending the old code.
 
 ## How it went
 
