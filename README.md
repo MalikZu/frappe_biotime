@@ -12,13 +12,14 @@ Connects Frappe HR to ZKTeco BioTime.
   dropped: one that cannot be imported yet waits and is tried again.
 - Move each Shift Type's Last Sync of Checkin only as far as every server has imported,
   so Frappe HR's auto attendance marks attendance without false Absents.
+- Match BioTime people to Frappe employees in a report, and set their Attendance Device
+  IDs from it.
 
-See [Punch import](docs/punch-import.md).
+See [Punch import](docs/punch-import.md) and [Employee mapping](docs/employee-mapping.md).
 
 ## Planned
 
 - Push employees, with their department, branch and designation, to BioTime.
-- A report that matches BioTime people to Frappe employees.
 - Frappe HR v16 (`main`) and v15 (`version-15`).
 
 Built on the [pybiotime](https://github.com/MalikZu/pybiotime) SDK.
