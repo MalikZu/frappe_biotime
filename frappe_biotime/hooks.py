@@ -153,6 +153,8 @@ scheduler_events = {
 		# Frappe v16 ticks every 4 minutes. This job only queues the imports on the long queue.
 		"*/4 * * * *": ["frappe_biotime.biotime.punches.enqueue_imports"],
 	},
+	# Resigns or deletes leavers in BioTime once their last day has passed.
+	"daily": ["frappe_biotime.biotime.employees.push_leavers"],
 }
 
 # scheduler_events = {

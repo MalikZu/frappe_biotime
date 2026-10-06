@@ -1,26 +1,30 @@
 """Push employees from Frappe to BioTime. Frappe is the master for employee records.
 
-Saving an employee queues a push after the save commits, so a save never waits for BioTime
-or fails because of it. A push brings the employee's copy on each server up to date: the
-person with their code, their names, and their department, area and position, created on
-the server when missing. An employee who left is resigned or deleted, as the server says.
-BioTime people with no Frappe employee are never touched.
+Once an employee's save commits, a push is queued: a save never waits for BioTime and never
+fails because of it. A push brings the employee's copy on each server up to date: the person
+with their code, their names, and their department, area and position, created on the server
+when missing. An employee who left is resigned or deleted, as the server says, once their
+relieving date has passed. BioTime people with no Frappe employee are never touched.
 """
 
 import contextlib
 import json
+import unicodedata
 from collections import Counter
+from functools import partial
+from time import monotonic
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, now_datetime, today
-from pybiotime import APIError, BioTimeError, ResignType
+from frappe.utils import add_days, formatdate, getdate, now_datetime, today
+from pybiotime import APIError, AuthenticationError, BioTimeError, ResignType, TransportError
 from pybiotime.compat import resign_api_from_error
 from redis.exceptions import LockError
 from rq.timeouts import JobTimeoutException
 
 from frappe_biotime.biotime import connection
-from frappe_biotime.biotime.punches import _describe, _save_status
+from frappe_biotime.biotime.names import words
+from frappe_biotime.biotime.punches import _describe, _save_status, traceback
 
 #: The Employee fields BioTime holds a copy of. A change to one of them is pushed.
 SYNCED_FIELDS = (
@@ -33,9 +37,17 @@ SYNCED_FIELDS = (
 	"designation",
 	"status",
 	"company",
+	"relieving_date",
 )
 #: How many times one job pushes an employee that keeps changing while it is pushed.
 MAX_ROUNDS = 3
+#: How long one Push All job runs before it queues the rest. Imports share the long queue,
+#: and the job must stay within the queue's time limit.
+PUSH_ALL_SECONDS = 600
+#: How many days back the daily job looks for leavers whose last day has passed.
+LEAVER_DAYS = 7
+#: Errors after which no other employee can be pushed in the same run either.
+UNREACHABLE = (TransportError, AuthenticationError)
 
 # What a server does with an employee who left: the options of On Employee Left.
 RESIGN = "Resign in BioTime"
@@ -48,28 +60,44 @@ class _Skip(Exception):
 
 
 def on_employee_update(doc, method=None) -> None:
-	"""Employee on_update: queue a push when something BioTime holds changed."""
+	"""Employee on_update: once the save commits, queue a push if something BioTime holds changed."""
 	if any(doc.has_value_changed(fieldname) for fieldname in SYNCED_FIELDS) and _servers():
-		enqueue_push(doc.name)
+		# After the commit, and guarded: queueing checks the queue, and a full or unreachable
+		# queue must not roll the save back.
+		frappe.db.after_commit.add(partial(_queue_push, doc.name))
 
 
-def enqueue_push(employee: str) -> None:
+def _queue_push(employee: str) -> None:
+	try:
+		enqueue_push(employee)
+	except Exception:
+		# Their next save, or Push All Employees, pushes them.
+		frappe.log_error(
+			title=f"BioTime push not queued for {employee}", message=traceback(), defer_insert=True
+		)
+
+
+def enqueue_push(employee: str, job_id: str | None = None) -> None:
 	frappe.enqueue(
 		"frappe_biotime.biotime.employees.push_employee",
-		job_id=f"biotime:push:{employee}",
+		job_id=job_id or f"biotime:push:{employee}",
 		deduplicate=True,
-		enqueue_after_commit=True,
 		employee=employee,
 	)
 
 
-def enqueue_push_all(server: str) -> None:
+def enqueue_push_all(
+	server: str, after: str | None = None, counts: dict | None = None, problems: list | None = None
+) -> None:
 	frappe.enqueue(
 		"frappe_biotime.biotime.employees.push_all",
 		queue="long",
-		job_id=f"biotime:push-all:{server}",
+		job_id=f"biotime:push-all:{server}" + (f":{after}" if after else ""),
 		deduplicate=True,
 		server=server,
+		after=after,
+		counts=counts,
+		problems=problems,
 	)
 
 
@@ -94,45 +122,93 @@ def push_employee(employee: str) -> None:
 	finally:
 		with contextlib.suppress(LockError):
 			lock.release()
+	# Still changing after the last round: another job pushes the rest.
+	enqueue_push(employee, job_id=f"biotime:push-again:{employee}")
 
 
-def push_all(server: str) -> None:
-	"""Job: push every employee with an Attendance Device ID to `server`."""
+def push_leavers() -> None:
+	"""Daily: push employees whose last day has just passed, so they are resigned or deleted."""
+	if not _servers():
+		return
+	for employee in frappe.get_all(
+		"Employee",
+		filters={
+			"status": "Left",
+			"attendance_device_id": ["is", "set"],
+			"relieving_date": ["between", [add_days(today(), -LEAVER_DAYS), add_days(today(), -1)]],
+		},
+		pluck="name",
+	):
+		enqueue_push(employee)
+
+
+def push_all(
+	server: str, after: str | None = None, counts: dict | None = None, problems: list | None = None
+) -> None:
+	"""Job: push every employee with an Attendance Device ID to `server`, in name order.
+
+	It stops after PUSH_ALL_SECONDS and queues the employees after the last one it pushed, with
+	the counts so far.
+	"""
+	started = monotonic()
 	server = frappe.get_doc("BioTime Server", server)
+	if not (server.enabled and server.push_employees and server.mode == "Pull"):
+		return
+	counts = Counter(counts or {})
+	problems = list(problems or [])
 	filters = {"attendance_device_id": ["is", "set"]}
 	if server.company:
 		filters["company"] = server.company
-	counts = Counter()
-	problems = []
-	# One Error Log per run is enough to find the cause.
+	if after:
+		filters["name"] = [">", after]
+	# One Error Log per job is enough to find the cause.
 	logged = False
+	# Every job gets at least one employee further, so the parts always end.
+	done = 0
 	try:
 		with connection.connect(server) as client:
 			for name in frappe.get_all("Employee", filters=filters, pluck="name", order_by="name asc"):
+				if done and monotonic() - started > PUSH_ALL_SECONDS:
+					_report_push_all(server.name, counts, problems, more=True)
+					enqueue_push_all(server.name, after, dict(counts), problems[:20])
+					return
+				after, done = name, done + 1
 				lock = _lock(name)
-				if not lock.acquire(blocking=False):
-					# Its own push is running and brings it up to date.
-					counts[_("pushed by their own job")] += 1
+				if not lock.acquire(blocking=True, blocking_timeout=60):
+					counts[_("skipped while another push of them ran")] += 1
 					continue
 				try:
-					outcome = _push(server, client, frappe.get_doc("Employee", name))
-					counts[outcome] += 1
-				except JobTimeoutException:
+					# A fresh read, not the one from when this job started.
+					frappe.db.commit()  # nosemgrep
+					counts[_push(server, client, frappe.get_doc("Employee", name))] += 1
+				except (*UNREACHABLE, JobTimeoutException):
 					raise
 				except Exception as exc:
 					if not isinstance(exc, _Skip) and not logged:
-						frappe.log_error(title=f"BioTime push failed for {server.name}")
+						frappe.log_error(title=f"BioTime push failed for {server.name}", message=traceback())
 						logged = True
 					counts[_("not pushed")] += 1
 					problems.append(f"{name}: {exc if isinstance(exc, _Skip) else _describe(exc)}")
 				finally:
 					with contextlib.suppress(LockError):
 						lock.release()
-	except BioTimeError as exc:
-		problems.insert(0, _("BioTime could not be reached: {0}").format(str(exc)))
+	except UNREACHABLE as exc:
+		problems.insert(0, _("Stopped: BioTime could not be reached ({0}).").format(str(exc)))
+	except JobTimeoutException:
+		problems.insert(0, _("Stopped: the job ran out of time. Run Push All Employees again."))
+		_report_push_all(server.name, counts, problems)
+		raise
+	_report_push_all(server.name, counts, problems)
+
+
+def _report_push_all(server: str, counts: Counter, problems: list, more: bool = False) -> None:
 	parts = [", ".join(f"{count} {outcome}" for outcome, count in counts.most_common()) or _("No employees.")]
+	if more:
+		parts.append(_("Still running: the rest is queued."))
 	parts.extend(problems[:20])
-	_save_status(server.name, last_push_at=now_datetime(), last_push_message="\n".join(parts)[:1000])
+	# A fresh read view: the server row may have changed since this job read it.
+	frappe.db.commit()  # nosemgrep
+	_save_status(server, last_push_at=now_datetime(), last_push_message="\n".join(parts)[:1000])
 
 
 def _push_and_report(server, employee) -> None:
@@ -150,10 +226,13 @@ def _push_and_report(server, employee) -> None:
 		# Logged and reported, so the other servers are still pushed.
 		frappe.log_error(
 			title=f"BioTime push failed for {server.name}",
+			message=traceback(),
 			reference_doctype="Employee",
 			reference_name=employee.name,
 		)
 		message = f"{employee.name}: {_describe(exc)}"
+	# A fresh read view: the server row may have changed while BioTime was read.
+	frappe.db.commit()  # nosemgrep
 	_save_status(server.name, last_push_at=now_datetime(), last_push_message=message[:1000])
 
 
@@ -168,25 +247,29 @@ def _pushes(server, employee) -> bool:
 def _push(server, client, employee) -> str:
 	"""Bring `server`'s copy of `employee` up to date. Returns what happened."""
 	code = employee.attendance_device_id.strip()
-	person, old_code = _find(client, employee, code)
 	if employee.status == "Left":
-		return _leave(server, client, employee, person)
+		# Resigning or deleting goes by the current code only.
+		return _leave(server, client, employee, _by_code(client, code))
+	person, old_code = _find(client, employee, code)
 	area = _area(server, client, employee)
 	values = {
 		"department_id": _department(server, client, employee),
-		"position_id": _position(server, client, employee),
-		"first_name": " ".join(name for name in (employee.first_name, employee.middle_name) if name) or None,
-		"last_name": employee.last_name or None,
+		"first_name": " ".join(name for name in (employee.first_name, employee.middle_name) if name),
+		# An empty value clears BioTime's; None would leave it as it is.
+		"last_name": employee.last_name or "",
+		**_position(server, client, employee),
 	}
 	if person is None:
-		client.employees.create(code, area_ids=[area], **values)
+		client.employees.create(_plain_code(code), area_ids=[area], **values)
 		return _("created in BioTime")
 	# Areas decide which terminals know a person: add theirs, and take none away.
 	values["area_ids"] = sorted({area, *(existing.id for existing in person.area)})
 	outcome = _("up to date in BioTime")
+	person_code = person.emp_code
 	if old_code:
+		person_code = _plain_code(code)
 		try:
-			client.employees.update(person.id, emp_code=code)
+			client.employees.update(person.id, emp_code=person_code)
 		except APIError as exc:
 			# BioTime 9.5 never changes a code. A second person under the new code would
 			# have no fingerprints, and terminals would keep sending the old code.
@@ -197,25 +280,54 @@ def _push(server, client, employee) -> str:
 				).format(old_code, code, str(exc))
 			) from None
 		outcome = _("code changed in BioTime from {0}").format(old_code)
-	client.employees.upsert(code, **values)
-	if server.on_employee_left == RESIGN and _reinstate(client, person):
+	client.employees.upsert(person_code, **values)
+	if employee.status == "Active" and server.on_employee_left == RESIGN and _reinstate(client, person):
 		outcome = _("reinstated in BioTime")
 	return outcome
 
 
 def _find(client, employee, code: str) -> tuple:
-	"""The BioTime person of `employee`, and the old code they were found under, if any."""
-	person = client.employees.get_by_code(code)
+	"""The BioTime person of `employee`, and the old code they were found under, if any.
+
+	A person under one of the employee's old codes counts only when they carry the employee's
+	name: after a typo or a wrong link, the old code belongs to someone else.
+	"""
+	person = _by_code(client, code)
 	if person is not None:
 		return person, None
+	name = words(employee.employee_name)
 	for old_code in _old_codes(employee.name, code):
 		# Another employee's code now: that person is theirs.
-		if frappe.db.exists("Employee", {"attendance_device_id": old_code}):
+		if frappe.db.exists("Employee", {"attendance_device_id": old_code, "name": ["!=", employee.name]}):
 			continue
-		person = client.employees.get_by_code(old_code)
-		if person is not None:
+		person = _by_code(client, old_code)
+		if (
+			person is not None
+			and name
+			and words(f"{person.first_name or ''} {person.last_name or ''}") == name
+		):
 			return person, old_code
 	return None, None
+
+
+def _by_code(client, code: str):
+	"""The BioTime person with `code`, matched as the database matches codes.
+
+	BioTime compares codes exactly, but the import maps punches by the database's comparison,
+	where case and digits of other scripts, such as Arabic, do not count.
+	"""
+	plain = _plain_code(code)
+	for spelling in dict.fromkeys((code, plain, plain.upper(), plain.lower())):
+		person = client.employees.get_by_code(spelling)
+		if person is not None:
+			return person
+	return None
+
+
+def _plain_code(code: str) -> str:
+	"""`code` as BioTime keeps codes: compatibility forms folded, and digits written 0-9."""
+	text = unicodedata.normalize("NFKC", code).strip()
+	return "".join(str(unicodedata.decimal(char)) if char.isdecimal() else char for char in text)
 
 
 def _old_codes(employee: str, current: str) -> list[str]:
@@ -238,11 +350,15 @@ def _old_codes(employee: str, current: str) -> list[str]:
 def _leave(server, client, employee, person) -> str:
 	if person is None:
 		return _("left, and not in BioTime")
+	if server.on_employee_left not in (RESIGN, DELETE):
+		return _("left, and kept in BioTime as the server says")
+	last_day = getdate(employee.relieving_date) if employee.relieving_date else None
+	if last_day and last_day >= getdate(today()):
+		# They may punch until their last day is over. The daily job pushes them after it.
+		return _("leaving after {0}, so changed in BioTime the day after").format(formatdate(last_day))
 	if server.on_employee_left == DELETE:
 		client.employees.delete(person.id)
 		return _("left, so deleted from BioTime")
-	if server.on_employee_left != RESIGN:
-		return _("left, and kept in BioTime as the server says")
 	resigns = _resigns(client, person)
 	if resigns is None:
 		raise _Skip(_("left, but this BioTime version cannot resign people. Resign them in BioTime."))
@@ -250,7 +366,7 @@ def _leave(server, client, employee, person) -> str:
 		return _("left, and already resigned in BioTime")
 	client.resigns.create(
 		person.id,
-		resign_date=getdate(employee.relieving_date or today()),
+		resign_date=last_day or getdate(today()),
 		resign_type=ResignType.QUIT,
 		reason=_("Left in Frappe"),
 	)
@@ -290,10 +406,13 @@ def _area(server, client, employee) -> int:
 	return _fixed(client.areas, server.default_area_code, _("Default Area Code"))
 
 
-def _position(server, client, employee) -> int | None:
-	if server.position_mapping == "Designation" and employee.designation:
-		return client.positions.upsert(employee.designation, employee.designation).id
-	return None
+def _position(server, client, employee) -> dict:
+	"""The position to send: the Designation's, an empty one to clear it, or none to leave it."""
+	if server.position_mapping != "Designation":
+		return {}
+	if not employee.designation:
+		return {"fields": {"position": None}}
+	return {"position_id": client.positions.upsert(employee.designation, employee.designation).id}
 
 
 def _fixed(resource, code: str | None, label: str) -> int:

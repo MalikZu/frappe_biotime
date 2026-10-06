@@ -292,7 +292,7 @@
   {
    "default": "Resign in BioTime",
    "depends_on": "push_employees",
-   "description": "What happens in BioTime when an employee's status becomes Left. Resigning keeps their punches.",
+   "description": "What happens in BioTime to an employee whose status is Left, the day after their Relieving Date. Resigning keeps their punches.",
    "fieldname": "on_employee_left",
    "fieldtype": "Select",
    "label": "On Employee Left",
