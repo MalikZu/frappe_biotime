@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import getdate, now_datetime
+from pybiotime import BioTimeError
 from redis.exceptions import LockError
 
 from frappe_biotime.biotime import connection, watermark
@@ -56,7 +57,7 @@ class BioTimeServer(Document):
 	@frappe.whitelist(methods=["POST"])
 	def test_connection(self) -> dict:
 		"""Log in, and report what the server shows about its version."""
-		with connection.connect(self) as client:
+		with _shown_as_message(_("Test Connection")), connection.connect(self) as client:
 			info = client.server_info()
 		frappe.db.set_value(self.doctype, self.name, "detected_version", info.version, update_modified=False)
 		return {
@@ -70,7 +71,7 @@ class BioTimeServer(Document):
 		"""Add BioTime's terminals to the table and refresh their details. Returns the count."""
 		# Start from the stored record: the browser's copy may hold stale status and read state.
 		self.reload()
-		with connection.connect(self) as client:
+		with _shown_as_message(_("Sync Terminals")), connection.connect(self) as client:
 			terminals = list(client.terminals.list())
 		rows = {row.serial_number: row for row in self.terminals}
 		for terminal in terminals:
@@ -130,3 +131,16 @@ class BioTimeServer(Document):
 			with contextlib.suppress(LockError):
 				lock.release()
 		enqueue_import(self.name)
+
+
+@contextlib.contextmanager
+def _shown_as_message(action: str):
+	"""Show a BioTime error to the user as a message, not as a server error.
+
+	Frappe logs a server error with the values of its variables, and pybiotime's hold the
+	BioTime token or password.
+	"""
+	try:
+		yield
+	except BioTimeError as exc:
+		frappe.throw(_("{0} did not work: {1}").format(action, str(exc)), title=action)

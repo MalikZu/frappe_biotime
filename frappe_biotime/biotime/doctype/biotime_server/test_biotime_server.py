@@ -32,6 +32,11 @@ class TestBioTimeServer(BioTimeTestCase):
 		self.assertEqual(result["version"], "9.5")
 		self.assertEqual(frappe.db.get_value("BioTime Server", self.server.name, "detected_version"), "9.5")
 
+	def test_biotime_errors_show_as_messages(self) -> None:
+		self.fake.fail_next(500, path="/iclock/api/terminals/")
+
+		self.assertRaises(frappe.ValidationError, self.server.sync_terminals)
+
 	def test_actions_need_post(self) -> None:
 		# A link (GET) must not start them: the CSRF check covers only POST.
 		for action in ("test_connection", "sync_terminals", "import_now", "push_all_employees", "start_over"):
