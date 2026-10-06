@@ -23,7 +23,6 @@ from redis.exceptions import LockError
 from rq.timeouts import JobTimeoutException
 
 from frappe_biotime.biotime import connection
-from frappe_biotime.biotime.names import words
 from frappe_biotime.biotime.punches import _describe, _save_status, traceback
 
 #: The Employee fields BioTime holds a copy of. A change to one of them is pushed.
@@ -153,6 +152,13 @@ def push_all(
 	started = monotonic()
 	server = frappe.get_doc("BioTime Server", server)
 	if not (server.enabled and server.push_employees and server.mode == "Pull"):
+		if after:
+			# A part queued before the server stopped pushing: say the run ended.
+			_report_push_all(
+				server.name,
+				Counter(counts or {}),
+				[_("Stopped: the server no longer pushes employees.")],
+			)
 		return
 	counts = Counter(counts or {})
 	problems = list(problems or [])
@@ -169,8 +175,8 @@ def push_all(
 		with connection.connect(server) as client:
 			for name in frappe.get_all("Employee", filters=filters, pluck="name", order_by="name asc"):
 				if done and monotonic() - started > PUSH_ALL_SECONDS:
-					_report_push_all(server.name, counts, problems, more=True)
 					enqueue_push_all(server.name, after, dict(counts), problems[:20])
+					_report_push_all(server.name, counts, problems, more=True)
 					return
 				after, done = name, done + 1
 				lock = _lock(name)
@@ -206,9 +212,21 @@ def _report_push_all(server: str, counts: Counter, problems: list, more: bool = 
 	if more:
 		parts.append(_("Still running: the rest is queued."))
 	parts.extend(problems[:20])
-	# A fresh read view: the server row may have changed since this job read it.
-	frappe.db.commit()  # nosemgrep
-	_save_status(server, last_push_at=now_datetime(), last_push_message="\n".join(parts)[:1000])
+	_write_status(server, last_push_at=now_datetime(), last_push_message="\n".join(parts)[:1000])
+
+
+def _write_status(server: str, **values) -> None:
+	"""Keep a push's outcome on the server. A failure here never stops the push."""
+	try:
+		# A fresh read view: the server's row may have changed while BioTime was read, and an
+		# update from an older view fails under snapshot isolation.
+		frappe.db.commit()  # nosemgrep
+		_save_status(server, **values)
+	except JobTimeoutException:
+		raise
+	except Exception:
+		frappe.db.rollback()
+		frappe.log_error(title=f"BioTime push status not saved for {server}", message=traceback())
 
 
 def _push_and_report(server, employee) -> None:
@@ -231,9 +249,7 @@ def _push_and_report(server, employee) -> None:
 			reference_name=employee.name,
 		)
 		message = f"{employee.name}: {_describe(exc)}"
-	# A fresh read view: the server row may have changed while BioTime was read.
-	frappe.db.commit()  # nosemgrep
-	_save_status(server.name, last_push_at=now_datetime(), last_push_message=message[:1000])
+	_write_status(server.name, last_push_at=now_datetime(), last_push_message=message[:1000])
 
 
 def _pushes(server, employee) -> bool:
@@ -250,7 +266,7 @@ def _push(server, client, employee) -> str:
 	if employee.status == "Left":
 		# Resigning or deleting goes by the current code only.
 		return _leave(server, client, employee, _by_code(client, code))
-	person, old_code = _find(client, employee, code)
+	person = _find(client, employee, code)
 	area = _area(server, client, employee)
 	values = {
 		"department_id": _department(server, client, employee),
@@ -265,56 +281,42 @@ def _push(server, client, employee) -> str:
 	# Areas decide which terminals know a person: add theirs, and take none away.
 	values["area_ids"] = sorted({area, *(existing.id for existing in person.area)})
 	outcome = _("up to date in BioTime")
-	person_code = person.emp_code
-	if old_code:
-		person_code = _plain_code(code)
-		try:
-			client.employees.update(person.id, emp_code=person_code)
-		except APIError as exc:
-			# BioTime 9.5 never changes a code. A second person under the new code would
-			# have no fingerprints, and terminals would keep sending the old code.
-			raise _Skip(
-				_(
-					"BioTime has this person under code {0} and did not change it to {1} ({2}). "
-					"Change it in BioTime, or set the Attendance Device ID back to {0}."
-				).format(old_code, code, str(exc))
-			) from None
-		outcome = _("code changed in BioTime from {0}").format(old_code)
-	client.employees.upsert(person_code, **values)
+	client.employees.upsert(person.emp_code, **values)
 	if employee.status == "Active" and server.on_employee_left == RESIGN and _reinstate(client, person):
 		outcome = _("reinstated in BioTime")
 	return outcome
 
 
-def _find(client, employee, code: str) -> tuple:
-	"""The BioTime person of `employee`, and the old code they were found under, if any.
+def _find(client, employee, code: str):
+	"""The BioTime person under the employee's code, or None when a new one may be created.
 
-	A person under one of the employee's old codes counts only when they carry the employee's
-	name: after a typo or a wrong link, the old code belongs to someone else.
+	The app never changes a code in BioTime. When the code changed and BioTime has someone
+	under an earlier one, only HR can tell who that is: the employee, whose fingerprints
+	terminals keep sending under that code, or someone else after a typo or a wrong link.
 	"""
 	person = _by_code(client, code)
 	if person is not None:
-		return person, None
-	name = words(employee.employee_name)
+		return person
 	for old_code in _old_codes(employee.name, code):
 		# Another employee's code now: that person is theirs.
 		if frappe.db.exists("Employee", {"attendance_device_id": old_code, "name": ["!=", employee.name]}):
 			continue
-		person = _by_code(client, old_code)
-		if (
-			person is not None
-			and name
-			and words(f"{person.first_name or ''} {person.last_name or ''}") == name
-		):
-			return person, old_code
-	return None, None
+		if _by_code(client, old_code) is not None:
+			raise _Skip(
+				_(
+					"BioTime has someone under {0}, this employee's earlier code, and no one under {1}. "
+					"If that is this employee, change their code to {1} in BioTime; if not, add {1} "
+					"there. Until then this employee is not pushed."
+				).format(old_code, code)
+			)
+	return None
 
 
 def _by_code(client, code: str):
-	"""The BioTime person with `code`, matched as the database matches codes.
+	"""The BioTime person with `code`, as typed, in digits 0-9, in capitals or in small letters.
 
-	BioTime compares codes exactly, but the import maps punches by the database's comparison,
-	where case and digits of other scripts, such as Arabic, do not count.
+	BioTime compares codes exactly, while the import maps punches the way the database
+	compares codes, where case and digits of other scripts, such as Arabic, do not count.
 	"""
 	plain = _plain_code(code)
 	for spelling in dict.fromkeys((code, plain, plain.upper(), plain.lower())):
@@ -396,13 +398,13 @@ def _resigns(client, person) -> list | None:
 def _department(server, client, employee) -> int:
 	if server.department_mapping != "Fixed code" and employee.department:
 		name = frappe.db.get_value("Department", employee.department, "department_name")
-		return client.departments.upsert(employee.department, name or employee.department).id
+		return _coded(client.departments, employee.department, name or employee.department)
 	return _fixed(client.departments, server.default_department_code, _("Default Department Code"))
 
 
 def _area(server, client, employee) -> int:
 	if server.area_mapping != "Fixed code" and employee.branch:
-		return client.areas.upsert(employee.branch, employee.branch).id
+		return _coded(client.areas, employee.branch, employee.branch)
 	return _fixed(client.areas, server.default_area_code, _("Default Area Code"))
 
 
@@ -412,7 +414,19 @@ def _position(server, client, employee) -> dict:
 		return {}
 	if not employee.designation:
 		return {"fields": {"position": None}}
-	return {"position_id": client.positions.upsert(employee.designation, employee.designation).id}
+	return {"position_id": _coded(client.positions, employee.designation, employee.designation)}
+
+
+def _coded(resource, code: str, name: str) -> int:
+	"""The id of the department, area or position with `code`, created or renamed as needed."""
+	try:
+		return resource.upsert(code, name).id
+	except APIError:
+		# Another push may have created it a moment ago, and BioTime refused this one.
+		found = resource.get_by_code(code)
+		if found is None:
+			raise
+		return found.id
 
 
 def _fixed(resource, code: str | None, label: str) -> int:
