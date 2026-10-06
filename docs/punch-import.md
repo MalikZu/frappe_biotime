@@ -57,7 +57,7 @@ imports leaves the list.
 
 | Reason | What to do |
 |---|---|
-| Unknown device ID | Set the employee's Attendance Device ID. **Unmapped Employee Codes** lists the codes. |
+| Unknown device ID | Set the employee's Attendance Device ID. **Actions > Employee Mapping** shows who each code is in BioTime and sets it for you. See [Employee mapping](employee-mapping.md). |
 | Inactive employee | Set the employee to Active if the punch should count. |
 | After relieving date | Correct the relieving date if it is wrong. |
 | Log type required | Map punch states or set terminal directions. |
