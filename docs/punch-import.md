@@ -93,9 +93,12 @@ has imported:
   one more import, since what it stored may still be on its way.
 - A refused punch or an Error holds attendance until it imports or you delete it. An
   unknown device ID holds only while it is new: for **Hold for New Unknown Codes** (24
-  hours by default) after an import first finds it, however old its punches are, and
-  not at all for a code that has waited longer, such as a visitor's. Inactive, After
-  relieving date and Left out by settings never hold.
+  hours by default) after an import first finds it, and not at all for a code that has
+  waited longer, such as a visitor's. Inactive, After relieving date and Left out by
+  settings never hold.
+- No waiting punch holds once it is more than two days older than the earliest Last Sync
+  of Checkin the app moves. Frappe HR has marked attendance for its day by then, and its
+  checkin could not change it, so holding would only stop everyone's attendance.
 - Last Sync of Checkin then moves to the earliest Imported Up To of all servers, minus
   **Attendance Buffer** (60 minutes by default). It never moves back. A disabled server
   keeps holding at its last Imported Up To, because its punches may still come: untick

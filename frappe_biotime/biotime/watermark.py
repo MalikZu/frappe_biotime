@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 #: Waiting punches that hold attendance until they import or are deleted: refusals and errors
 #: can hit every punch, so letting them expire would mark everyone Absent a day later.
 HOLD_UNTIL_RESOLVED = (LOG_TYPE_REQUIRED, NO_LOCATION, OUTSIDE_RADIUS, ERROR)
+#: Frappe HR has marked all attendance from this long before a Shift Type's last sync: from
+#: checkins once the last sync passes a shift's end, and Absent a day after. The second day
+#: covers long shifts and early checkins.
+MARKED_BEFORE_LAST_SYNC = timedelta(days=2)
 
 
 @dataclass
@@ -143,7 +147,9 @@ def _holding_punch(server: "BioTimeServer", started: datetime) -> Any:
 	while it is new: first stored within the server's hold, so a code that never gets linked,
 	such as a visitor's, stops holding. Stored, not punched: a new code that arrives in a late
 	upload holds too. Inactive, After relieving date and Left out by settings never hold,
-	because Frappe HR marks no attendance from them.
+	because Frappe HR marks no attendance from them. Nor does a punch from before
+	_marked_up_to: attendance for its day is marked, and its checkin could not change it, so
+	holding would only stop everyone's.
 	"""
 	table = DocType(PENDING)
 	holds = table.reason.isin(HOLD_UNTIL_RESOLVED)
@@ -158,16 +164,38 @@ def _holding_punch(server: "BioTimeServer", started: datetime) -> Any:
 		holds = holds | (
 			(table.reason == UNMAPPED) & (table.creation >= cutoff) & table.emp_code.notin(seen_before)
 		)
-	rows = (
+	query = (
 		frappe.qb.from_(table)
 		.select(table.emp_code, table.punch_time, table.reason)
 		.where(table.server == server.name)
 		.where(holds)
 		.orderby(table.punch_time)
 		.limit(1)
-		.run(as_dict=True)
 	)
+	marked = _marked_up_to()
+	if marked:
+		query = query.where(table.punch_time >= marked)
+	rows = query.run(as_dict=True)
 	return rows[0] if rows else None
+
+
+def _marked_up_to() -> datetime | None:
+	"""Up to when Frappe HR has marked attendance for every Shift Type this app moves.
+
+	Frappe HR does not change attendance for a checkin that comes later. None while the app
+	moves no Shift Type.
+	"""
+	floor = _floor(_servers())
+	syncs = [
+		get_datetime(shift.last_sync_of_checkin)
+		for shift in frappe.get_all(
+			"Shift Type",
+			filters={"enable_auto_attendance": 1, "auto_update_last_sync": 0},
+			fields=["last_sync_of_checkin", "process_attendance_after"],
+		)
+		if _movable(shift, floor)
+	]
+	return min(syncs) - MARKED_BEFORE_LAST_SYNC if syncs else None
 
 
 def move_shift_types() -> None:
