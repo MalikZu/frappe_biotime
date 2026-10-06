@@ -53,6 +53,14 @@ frappe.ui.form.on("BioTime Server", {
 			() => frappe.set_route("List", "BioTime Pending Punch", { server: frm.doc.name }),
 			actions
 		);
+		frm.add_custom_button(
+			__("Employee Mapping"),
+			() =>
+				frappe.set_route("query-report", "BioTime Employee Mapping", {
+					server: frm.doc.name,
+				}),
+			actions
+		);
 		const notes = attendance_notes(frm.doc.__onload?.attendance || {});
 		if (frm.doc.waiting_punches) {
 			notes.unshift(
