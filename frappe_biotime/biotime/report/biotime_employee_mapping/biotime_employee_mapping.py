@@ -3,8 +3,6 @@
 
 """Match BioTime people to Frappe employees, so HR can set Attendance Device IDs fast."""
 
-import re
-import unicodedata
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -16,6 +14,7 @@ from frappe.utils import escape_html, strip_html
 from pybiotime import BioTimeError
 
 from frappe_biotime.biotime import connection
+from frappe_biotime.biotime.names import words as name_words
 from frappe_biotime.biotime.punches import PENDING, UNMAPPED, _code_key, _employees_by_code
 
 # How a code stands: the values of the Match column.
@@ -24,16 +23,6 @@ SAME_NAME = "Same name"
 SIMILAR_NAME = "Similar name"
 NO_MATCH = "No match"
 NOT_IN_BIOTIME = "Not in BioTime"
-
-#: Arabic letters written more than one way: teh marbuta as heh, alef maksura as yeh, and
-#: no tatweel. Hamza forms fold through NFKD.
-_ARABIC = str.maketrans(
-	{
-		"\N{ARABIC LETTER TEH MARBUTA}": "\N{ARABIC LETTER HEH}",
-		"\N{ARABIC LETTER ALEF MAKSURA}": "\N{ARABIC LETTER YEH}",
-		"\N{ARABIC TATWEEL}": "",
-	}
-)
 
 
 def execute(filters: dict | None = None) -> tuple:
@@ -148,7 +137,7 @@ def _suggestions(names: dict[str, str], candidates: list) -> dict[str, tuple[Any
 	words, and they share at least two. An employee who matches several codes is suggested
 	for none of them, so HR picks.
 	"""
-	words_of = [_words(employee.employee_name) for employee in candidates]
+	words_of = [name_words(employee.employee_name) for employee in candidates]
 	by_words = defaultdict(list)
 	by_word = defaultdict(set)
 	for index, words in enumerate(words_of):
@@ -158,7 +147,7 @@ def _suggestions(names: dict[str, str], candidates: list) -> dict[str, tuple[Any
 
 	found = {}
 	for code, name in names.items():
-		words = _words(name)
+		words = name_words(name)
 		if not words:
 			continue
 		same = by_words.get(words, [])
@@ -177,13 +166,6 @@ def _suggestions(names: dict[str, str], candidates: list) -> dict[str, tuple[Any
 
 	times = Counter(employee.name for employee, _match in found.values())
 	return {code: pair for code, pair in found.items() if times[pair[0].name] == 1}
-
-
-def _words(name: str | None) -> frozenset[str]:
-	"""The words of a name, compared without case, accents or Arabic spelling variants."""
-	text = unicodedata.normalize("NFKD", name or "")
-	text = "".join(char for char in text if not unicodedata.combining(char))
-	return frozenset(re.findall(r"\w+", text.casefold().translate(_ARABIC)))
 
 
 @frappe.whitelist(methods=["POST"])
