@@ -11,7 +11,7 @@ from frappe.utils import getdate, now_datetime
 from pybiotime import BioTimeError
 from redis.exceptions import LockError
 
-from frappe_biotime.biotime import connection, watermark
+from frappe_biotime.biotime import connection, reimport, watermark
 from frappe_biotime.biotime.employees import enqueue_push_all
 from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import, import_lock, site_time
 
@@ -131,6 +131,23 @@ class BioTimeServer(Document):
 			with contextlib.suppress(LockError):
 				lock.release()
 		enqueue_import(self.name)
+
+	@frappe.whitelist(methods=["POST"])
+	def reimport_punches(self, from_date: str, to_date: str, codes: str | None = None) -> None:
+		"""Queue a re-import of the punches from `from_date` to `to_date`, for everyone or `codes`.
+
+		`codes` are employee codes, separated by commas, spaces or new lines.
+		"""
+		self.check_permission("write")
+		# Check the stored record, not the browser's copy with its unsaved edits.
+		self.reload()
+		reimport.request(self, from_date, to_date, codes)
+
+	@frappe.whitelist(methods=["POST"])
+	def stop_reimport(self) -> None:
+		"""Stop the running re-import. What it imported stays."""
+		self.check_permission("write")
+		reimport.stop(self)
 
 
 @contextlib.contextmanager

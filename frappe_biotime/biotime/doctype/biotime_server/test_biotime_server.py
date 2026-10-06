@@ -39,7 +39,16 @@ class TestBioTimeServer(BioTimeTestCase):
 
 	def test_actions_need_post(self) -> None:
 		# A link (GET) must not start them: the CSRF check covers only POST.
-		for action in ("test_connection", "sync_terminals", "import_now", "push_all_employees", "start_over"):
+		actions = (
+			"test_connection",
+			"sync_terminals",
+			"import_now",
+			"push_all_employees",
+			"start_over",
+			"reimport_punches",
+			"stop_reimport",
+		)
+		for action in actions:
 			method = getattr(BioTimeServer, action)
 			self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ["POST"], action)
 

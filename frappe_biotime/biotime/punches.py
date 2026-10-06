@@ -177,7 +177,8 @@ def import_punches(server: str, retry_all: bool = False) -> ImportCounts | None:
 
 	Each punch becomes a checkin or waits as a BioTime Pending Punch. Waiting punches are
 	tried again when something they depend on changed, once a day, or every time when
-	`retry_all` is set or Import Now asked for it. Returns the counts, or ``None`` when the run
+	`retry_all` is set or Import Now asked for it. A requested re-import goes on in the same run.
+	Returns the counts, or ``None`` when the run
 	failed or another run holds the lock. A failure is recorded on the server and in the Error
 	Log; the read state stays as it was, so the next run reads the same punches again.
 	"""
@@ -198,8 +199,8 @@ def import_punches(server: str, retry_all: bool = False) -> ImportCounts | None:
 
 
 def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> ImportCounts | None:
-	# Imported here because the watermark module builds on this one.
-	from frappe_biotime.biotime import watermark
+	# Imported here because these modules build on this one.
+	from frappe_biotime.biotime import reimport, watermark
 
 	counts = ImportCounts()
 	# Import Now asks through the server, so the request survives a run that is already queued.
@@ -235,6 +236,8 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 		)
 		retries = _retry_candidates(server, retry_all or bool(requested), started)
 		store_punches(server, [Punch.from_waiting(row) for row in retries], counts, started)
+		# Before the reach, so a punch it leaves waiting can hold attendance in this run.
+		reimport.run(server, started, site_timezone)
 		waiting_now = _waiting_counts(server.name)
 		backlogs = watermark.backlogs(server, result.transactions)
 		reach = watermark.reach(server, started, terminals, terminals_error, backlogs)

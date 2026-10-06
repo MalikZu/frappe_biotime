@@ -50,6 +50,11 @@ frappe.ui.form.on("BioTime Server", {
 				actions
 			);
 			frm.add_custom_button(__("Start Over"), () => start_over(frm), actions);
+			if (frm.doc.reimport_request) {
+				frm.add_custom_button(__("Stop Re-import"), () => stop_reimport(frm), actions);
+			} else {
+				frm.add_custom_button(__("Re-import"), () => reimport_punches(frm), actions);
+			}
 		}
 		if (frm.doc.mode === "Pull" && frm.doc.push_employees) {
 			frm.add_custom_button(
@@ -85,6 +90,13 @@ frappe.ui.form.on("BioTime Server", {
 					"{0} punches are waiting to become checkins. Imports try them again when something they depend on changes, and at least daily. Import Now tries all of them.",
 					[frm.doc.waiting_punches]
 				)
+			);
+		}
+		if (frm.doc.reimport_request) {
+			notes.push(
+				__("Re-import running: {0}", [
+					frappe.utils.escape_html(frm.doc.reimport_status || ""),
+				])
 			);
 		}
 		frm.set_intro(notes.join("<br>"), "orange");
@@ -170,4 +182,49 @@ function start_over(frm) {
 		},
 	});
 	dialog.show();
+}
+
+function reimport_punches(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Re-import"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				options: `<p>${__(
+					"Reads these days from BioTime again and imports the punches that are not in Frappe yet, such as punches of a terminal or company this server left out then, or from before Import From. Punches already in Frappe are recognized. Attendance already marked for these days does not change."
+				)}</p>`,
+			},
+			{ fieldname: "from_date", fieldtype: "Date", label: __("From Date"), reqd: 1 },
+			{
+				fieldname: "to_date",
+				fieldtype: "Date",
+				label: __("To Date"),
+				reqd: 1,
+				default: frappe.datetime.get_today(),
+			},
+			{
+				fieldname: "codes",
+				fieldtype: "Small Text",
+				label: __("Employee Codes"),
+				description: __(
+					"BioTime employee codes, separated by commas or new lines. Leave empty for everyone."
+				),
+			},
+		],
+		primary_action_label: __("Re-import"),
+		primary_action(values) {
+			frm.call("reimport_punches", values).then(() => {
+				dialog.hide();
+				frappe.show_alert({ message: __("Re-import queued"), indicator: "blue" });
+				frm.reload_doc();
+			});
+		},
+	});
+	dialog.show();
+}
+
+function stop_reimport(frm) {
+	frappe.confirm(__("Stop the re-import? The punches it imported stay."), () => {
+		frm.call("stop_reimport").then(() => frm.reload_doc());
+	});
 }
