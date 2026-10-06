@@ -129,7 +129,7 @@ def push_all(server: str) -> None:
 					with contextlib.suppress(LockError):
 						lock.release()
 	except BioTimeError as exc:
-		problems.insert(0, _("BioTime could not be reached: {0}").format(exc))
+		problems.insert(0, _("BioTime could not be reached: {0}").format(str(exc)))
 	parts = [", ".join(f"{count} {outcome}" for outcome, count in counts.most_common()) or _("No employees.")]
 	parts.extend(problems[:20])
 	_save_status(server.name, last_push_at=now_datetime(), last_push_message="\n".join(parts)[:1000])
@@ -175,7 +175,7 @@ def _push(server, client, employee) -> str:
 	values = {
 		"department_id": _department(server, client, employee),
 		"position_id": _position(server, client, employee),
-		"first_name": " ".join(filter(None, (employee.first_name, employee.middle_name))) or None,
+		"first_name": " ".join(name for name in (employee.first_name, employee.middle_name) if name) or None,
 		"last_name": employee.last_name or None,
 	}
 	if person is None:
@@ -194,7 +194,7 @@ def _push(server, client, employee) -> str:
 				_(
 					"BioTime has this person under code {0} and did not change it to {1} ({2}). "
 					"Change it in BioTime, or set the Attendance Device ID back to {0}."
-				).format(old_code, code, exc)
+				).format(old_code, code, str(exc))
 			) from None
 		outcome = _("code changed in BioTime from {0}").format(old_code)
 	client.employees.upsert(code, **values)
