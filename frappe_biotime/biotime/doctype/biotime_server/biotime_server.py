@@ -53,7 +53,7 @@ class BioTimeServer(Document):
 				indicator="orange",
 			)
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def test_connection(self) -> dict:
 		"""Log in, and report what the server shows about its version."""
 		with connection.connect(self) as client:
@@ -65,7 +65,7 @@ class BioTimeServer(Document):
 			"has_resigns": info.has_resigns,
 		}
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def sync_terminals(self) -> int:
 		"""Add BioTime's terminals to the table and refresh their details. Returns the count."""
 		# Start from the stored record: the browser's copy may hold stale status and read state.
@@ -83,7 +83,7 @@ class BioTimeServer(Document):
 		self.save()
 		return len(terminals)
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def import_now(self) -> None:
 		"""Queue an import now, and ask it to try every waiting punch again."""
 		self.check_permission("write")
@@ -95,7 +95,7 @@ class BioTimeServer(Document):
 		frappe.db.commit()  # nosemgrep
 		enqueue_import(self.name)
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def push_all_employees(self) -> None:
 		"""Queue a push of every employee with an Attendance Device ID to this server."""
 		self.check_permission("write")
@@ -103,7 +103,7 @@ class BioTimeServer(Document):
 			frappe.throw(_("Push All Employees needs an enabled Pull server with Push Employees on."))
 		enqueue_push_all(self.name)
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def start_over(self, from_date: str) -> None:
 		"""Read BioTime again from `from_date`, after its database was restored or reinstalled.
 

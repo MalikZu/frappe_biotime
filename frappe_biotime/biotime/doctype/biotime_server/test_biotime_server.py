@@ -8,6 +8,7 @@ import frappe
 from pybiotime.testing import FakeBioTime
 
 from frappe_biotime.biotime import punches
+from frappe_biotime.biotime.doctype.biotime_server.biotime_server import BioTimeServer
 from frappe_biotime.install import CUSTOM_FIELDS
 from frappe_biotime.tests.utils import DAY, GATE, BioTimeTestCase
 
@@ -30,6 +31,12 @@ class TestBioTimeServer(BioTimeTestCase):
 
 		self.assertEqual(result["version"], "9.5")
 		self.assertEqual(frappe.db.get_value("BioTime Server", self.server.name, "detected_version"), "9.5")
+
+	def test_actions_need_post(self) -> None:
+		# A link (GET) must not start them: the CSRF check covers only POST.
+		for action in ("test_connection", "sync_terminals", "import_now", "push_all_employees", "start_over"):
+			method = getattr(BioTimeServer, action)
+			self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ["POST"], action)
 
 	def test_rejects_unknown_timezones(self) -> None:
 		self.server.timezone = "Mars/Olympus"
