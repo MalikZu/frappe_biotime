@@ -99,8 +99,8 @@ class BioTimeServer(Document):
 	def push_all_employees(self) -> None:
 		"""Queue a push of every employee with an Attendance Device ID to this server."""
 		self.check_permission("write")
-		if not self.push_employees or self.mode != "Pull":
-			frappe.throw(_("Turn on Push Employees on a Pull server first."))
+		if not (self.enabled and self.push_employees and self.mode == "Pull"):
+			frappe.throw(_("Push All Employees needs an enabled Pull server with Push Employees on."))
 		enqueue_push_all(self.name)
 
 	@frappe.whitelist()
