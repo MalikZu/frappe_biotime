@@ -632,7 +632,7 @@ def _employees_by_code(codes: set[str]) -> dict[str, Any]:
 	"""Employees by the `_code_key` of each code in `codes`, matched as the database matches."""
 	if not codes:
 		return {}
-	fields = ["name", "attendance_device_id", "company", "status", "relieving_date"]
+	fields = ["name", "employee_name", "attendance_device_id", "company", "status", "relieving_date"]
 	rows = frappe.get_all("Employee", filters={"attendance_device_id": ["in", list(codes)]}, fields=fields)
 	employees = {_code_key(row.attendance_device_id): row for row in rows}
 	keys = {_code_key(code) for code in codes}
