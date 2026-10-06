@@ -140,13 +140,10 @@ before_uninstall = "frappe_biotime.install.before_uninstall"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	# Queues a push to BioTime after the save commits; never blocks the save.
+	"Employee": {"on_update": "frappe_biotime.biotime.employees.on_employee_update"},
+}
 
 # Scheduled Tasks
 # ---------------

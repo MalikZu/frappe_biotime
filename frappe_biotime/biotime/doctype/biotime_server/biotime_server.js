@@ -48,6 +48,19 @@ frappe.ui.form.on("BioTime Server", {
 			);
 			frm.add_custom_button(__("Start Over"), () => start_over(frm), actions);
 		}
+		if (frm.doc.mode === "Pull" && frm.doc.push_employees) {
+			frm.add_custom_button(
+				__("Push All Employees"),
+				() =>
+					frm.call("push_all_employees").then(() =>
+						frappe.show_alert({
+							message: __("Push queued. Last Push Message shows how it went."),
+							indicator: "blue",
+						})
+					),
+				actions
+			);
+		}
 		frm.add_custom_button(
 			__("Waiting Punches"),
 			() => frappe.set_route("List", "BioTime Pending Punch", { server: frm.doc.name }),

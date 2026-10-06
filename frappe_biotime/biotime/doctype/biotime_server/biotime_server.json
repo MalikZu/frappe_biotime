@@ -34,6 +34,15 @@
   "attendance_buffer_minutes",
   "column_break_attendance",
   "attendance_hold_hours",
+  "push_section",
+  "push_employees",
+  "department_mapping",
+  "default_department_code",
+  "position_mapping",
+  "column_break_push",
+  "area_mapping",
+  "default_area_code",
+  "on_employee_left",
   "terminals_section",
   "terminals",
   "status_section",
@@ -50,6 +59,8 @@
   "key_generation",
   "unmapped_codes",
   "last_run_message",
+  "last_push_at",
+  "last_push_message",
   "read_state",
   "retry_requested_at",
   "terminal_reach"
@@ -223,6 +234,71 @@
    "non_negative": 1
   },
   {
+   "collapsible": 1,
+   "description": "Frappe is the master for employee records. With Push Employees on, saving an employee updates their copy in BioTime.",
+   "fieldname": "push_section",
+   "fieldtype": "Section Break",
+   "label": "Employee Push"
+  },
+  {
+   "default": "0",
+   "description": "Create and update each employee with an Attendance Device ID in BioTime. BioTime's copy is overwritten.",
+   "fieldname": "push_employees",
+   "fieldtype": "Check",
+   "label": "Push Employees"
+  },
+  {
+   "default": "Department",
+   "depends_on": "push_employees",
+   "fieldname": "department_mapping",
+   "fieldtype": "Select",
+   "label": "BioTime Department From",
+   "options": "Department\nFixed code"
+  },
+  {
+   "depends_on": "push_employees",
+   "description": "A BioTime department code, for Fixed code and for employees without a Department.",
+   "fieldname": "default_department_code",
+   "fieldtype": "Data",
+   "label": "Default Department Code"
+  },
+  {
+   "default": "Designation",
+   "depends_on": "push_employees",
+   "fieldname": "position_mapping",
+   "fieldtype": "Select",
+   "label": "BioTime Position From",
+   "options": "Designation\nNone"
+  },
+  {
+   "fieldname": "column_break_push",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Branch",
+   "depends_on": "push_employees",
+   "fieldname": "area_mapping",
+   "fieldtype": "Select",
+   "label": "BioTime Area From",
+   "options": "Branch\nFixed code"
+  },
+  {
+   "depends_on": "push_employees",
+   "description": "A BioTime area code, for Fixed code and for employees without a Branch.",
+   "fieldname": "default_area_code",
+   "fieldtype": "Data",
+   "label": "Default Area Code"
+  },
+  {
+   "default": "Resign in BioTime",
+   "depends_on": "push_employees",
+   "description": "What happens in BioTime when an employee's status becomes Left. Resigning keeps their punches.",
+   "fieldname": "on_employee_left",
+   "fieldtype": "Select",
+   "label": "On Employee Left",
+   "options": "Resign in BioTime\nDo nothing\nDelete in BioTime"
+  },
+  {
    "fieldname": "terminals_section",
    "fieldtype": "Section Break",
    "label": "Terminals"
@@ -330,6 +406,20 @@
    "fieldname": "last_run_message",
    "fieldtype": "Small Text",
    "label": "Last Message",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_push_at",
+   "fieldtype": "Datetime",
+   "label": "Last Push",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_push_message",
+   "fieldtype": "Small Text",
+   "label": "Last Push Message",
    "no_copy": 1,
    "read_only": 1
   },

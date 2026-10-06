@@ -11,6 +11,7 @@ from frappe.utils import getdate, now_datetime
 from redis.exceptions import LockError
 
 from frappe_biotime.biotime import connection, watermark
+from frappe_biotime.biotime.employees import enqueue_push_all
 from frappe_biotime.biotime.punches import STRICT_LOG_TYPE, enqueue_import, import_lock, site_time
 
 
@@ -26,6 +27,13 @@ class BioTimeServer(Document):
 				frappe.throw(_("{0} is not a timezone name, such as Asia/Dubai.").format(self.timezone))
 		if self.lookback_days is not None and self.lookback_days < 0:
 			frappe.throw(_("Lookback cannot be negative."))
+		if self.push_employees:
+			for mapping, code, label in (
+				(self.department_mapping, self.default_department_code, _("Default Department Code")),
+				(self.area_mapping, self.default_area_code, _("Default Area Code")),
+			):
+				if mapping == "Fixed code" and not code:
+					frappe.throw(_("Set {0} to push employees with a fixed code.").format(label))
 		self.warn_about_strict_shifts()
 
 	def warn_about_strict_shifts(self) -> None:
@@ -86,6 +94,14 @@ class BioTimeServer(Document):
 		# Committed before queueing, so a run that starts at once sees the request.
 		frappe.db.commit()  # nosemgrep
 		enqueue_import(self.name)
+
+	@frappe.whitelist()
+	def push_all_employees(self) -> None:
+		"""Queue a push of every employee with an Attendance Device ID to this server."""
+		self.check_permission("write")
+		if not self.push_employees or self.mode != "Pull":
+			frappe.throw(_("Turn on Push Employees on a Pull server first."))
+		enqueue_push_all(self.name)
 
 	@frappe.whitelist()
 	def start_over(self, from_date: str) -> None:
