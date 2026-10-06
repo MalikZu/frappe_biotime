@@ -4,6 +4,7 @@
 import frappe
 from erpnext.setup.doctype.employee.test_employee import make_employee
 
+from frappe_biotime.biotime.names import words
 from frappe_biotime.biotime.report.biotime_employee_mapping import biotime_employee_mapping as mapping
 from frappe_biotime.tests.utils import BioTimeTestCase
 
@@ -57,9 +58,9 @@ class TestEmployeeMapping(BioTimeTestCase):
 		self.assertEqual({rows["2002"]["match"], rows["2005"]["match"]}, {mapping.NO_MATCH})
 
 	def test_names_match_without_case_accents_or_arabic_variants(self) -> None:
-		self.assertEqual(mapping._words("أحمد  الحسن"), mapping._words("احمد الحسن"))
-		self.assertEqual(mapping._words("فاطمة"), mapping._words("فاطمه"))
-		self.assertEqual(mapping._words("Zoë AL-Hassan"), mapping._words("zoe al hassan"))
+		self.assertEqual(words("أحمد  الحسن"), words("احمد الحسن"))
+		self.assertEqual(words("فاطمة"), words("فاطمه"))
+		self.assertEqual(words("Zoë AL-Hassan"), words("zoe al hassan"))
 
 	def test_unreadable_biotime_lists_the_waiting_codes(self) -> None:
 		self.punch("9999", 9)
