@@ -235,11 +235,15 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 		)
 		retries = _retry_candidates(server, retry_all or bool(requested), started)
 		store_punches(server, [Punch.from_waiting(row) for row in retries], counts, started)
-		if requested:
-			_clear_retry_request(server.name, requested)
 		waiting_now = _waiting_counts(server.name)
 		backlogs = watermark.backlogs(server, result.transactions)
 		reach = watermark.reach(server, started, terminals, terminals_error, backlogs)
+		unmapped_codes = _unmapped_codes(server.name)
+		# A fresh read view for the writes below: pushes and Import Now write this server's row
+		# meanwhile, and an update from an older view fails under snapshot isolation.
+		frappe.db.commit()  # nosemgrep
+		if requested:
+			_clear_retry_request(server.name, requested)
 		_save_status(
 			server.name,
 			last_run_at=started,
@@ -247,7 +251,7 @@ def _import(server: "BioTimeServer", retry_all: bool, started: datetime) -> Impo
 			last_run_message=summary(counts, waiting_now),
 			last_imported_count=counts.imported,
 			waiting_punches=waiting_now.total(),
-			unmapped_codes=_unmapped_codes(server.name),
+			unmapped_codes=unmapped_codes,
 			held_back_by=reach.held_back_by,
 			# Unknown this run: keep the last known reach.
 			**(
