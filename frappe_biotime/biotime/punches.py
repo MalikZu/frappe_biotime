@@ -287,6 +287,7 @@ def _imported_from(server: "BioTimeServer") -> date:
 def _fail(server: "BioTimeServer", started: datetime, message: str) -> None:
 	frappe.log_error(
 		title=f"BioTime import failed for {server.name}",
+		message=traceback(),
 		reference_doctype=server.doctype,
 		reference_name=server.name,
 	)
@@ -549,6 +550,7 @@ def _insert(checkin, server, counts: ImportCounts) -> tuple[str, str] | None:
 			if not counts.error_logged:
 				frappe.log_error(
 					title=f"BioTime punch could not be imported for {server.name}",
+					message=traceback(),
 					reference_doctype=server.doctype,
 					reference_name=server.name,
 				)
@@ -579,6 +581,15 @@ def _refusal(checkin, exc: Exception) -> str | None:
 	):
 		return NO_LOCATION
 	return None
+
+
+def traceback() -> str:
+	"""The current exception's traceback, without the values of variables.
+
+	Frappe logs those values by default, and pybiotime's frames hold the BioTime token or
+	password in variables Frappe does not hide.
+	"""
+	return frappe.get_traceback(with_context=False)
 
 
 def _describe(exc: Exception) -> str:
