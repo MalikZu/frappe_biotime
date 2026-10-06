@@ -7,9 +7,11 @@ frappe.ui.form.on("BioTime Server", {
 			return;
 		}
 		const actions = __("Actions");
+		// The handlers below return nothing: Frappe calls finally() on a returned promise, and
+		// frm.call's jQuery promise has none.
 		frm.add_custom_button(
 			__("Test Connection"),
-			() =>
+			() => {
 				frm.call("test_connection").then(({ message }) => {
 					frappe.msgprint({
 						title: __("Connected"),
@@ -20,30 +22,31 @@ frappe.ui.form.on("BioTime Server", {
 						].join("<br>"),
 					});
 					frm.reload_doc();
-				}),
+				});
+			},
 			actions
 		);
 		frm.add_custom_button(
 			__("Sync Terminals"),
-			() =>
+			() => {
 				frm.call("sync_terminals").then(({ message }) => {
 					frappe.show_alert({
 						message: __("{0} terminals synced", [message]),
 						indicator: "green",
 					});
 					frm.reload_doc();
-				}),
+				});
+			},
 			actions
 		);
 		if (frm.doc.mode === "Pull" && frm.doc.import_punches) {
 			frm.add_custom_button(
 				__("Import Now"),
-				() =>
-					frm
-						.call("import_now")
-						.then(() =>
-							frappe.show_alert({ message: __("Import queued"), indicator: "blue" })
-						),
+				() => {
+					frm.call("import_now").then(() =>
+						frappe.show_alert({ message: __("Import queued"), indicator: "blue" })
+					);
+				},
 				actions
 			);
 			frm.add_custom_button(__("Start Over"), () => start_over(frm), actions);
@@ -51,13 +54,14 @@ frappe.ui.form.on("BioTime Server", {
 		if (frm.doc.mode === "Pull" && frm.doc.push_employees) {
 			frm.add_custom_button(
 				__("Push All Employees"),
-				() =>
+				() => {
 					frm.call("push_all_employees").then(() =>
 						frappe.show_alert({
 							message: __("Push queued. Last Push Message shows how it went."),
 							indicator: "blue",
 						})
-					),
+					);
+				},
 				actions
 			);
 		}
