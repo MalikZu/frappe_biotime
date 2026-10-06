@@ -77,6 +77,8 @@ Two kinds of new punches are counted in **Last Message** and not kept:
 - **Left out by this server's settings:** the terminal's **Import Punches** is off, or
   the employee belongs to another company than the server's **Company**.
 
+To import punches that were left out after you change the setting, use [Re-import](#re-import).
+
 ## Attendance
 
 Frappe HR marks attendance, Absent included, for each Shift Type up to its **Last Sync of
@@ -93,9 +95,12 @@ has imported:
   one more import, since what it stored may still be on its way.
 - A refused punch or an Error holds attendance until it imports or you delete it. An
   unknown device ID holds only while it is new: for **Hold for New Unknown Codes** (24
-  hours by default) after an import first finds it, however old its punches are, and
-  not at all for a code that has waited longer, such as a visitor's. Inactive, After
-  relieving date and Left out by settings never hold.
+  hours by default) after an import first finds it, and not at all for a code that has
+  waited longer, such as a visitor's. Inactive, After relieving date and Left out by
+  settings never hold.
+- No waiting punch holds once it is more than two days older than the earliest Last Sync
+  of Checkin the app moves. Frappe HR has marked attendance for its day by then, and its
+  checkin could not change it, so holding would only stop everyone's attendance.
 - Last Sync of Checkin then moves to the earliest Imported Up To of all servers, minus
   **Attendance Buffer** (60 minutes by default). It never moves back. A disabled server
   keeps holding at its last Imported Up To, because its punches may still come: untick
@@ -117,6 +122,30 @@ change it.
 A terminal that is gone for good holds attendance until you untick its **Holds
 Attendance**. Do not untick Import Punches for that: its punches would then be left out,
 even ones it uploads if it comes back.
+
+## Re-import
+
+Re-import reads days from BioTime again and imports the punches that are not in Frappe
+yet. Use it for punches the imports left out or never read: after you tick a terminal's
+**Import Punches** again or change the server's **Company**, or for days before **Import
+From**.
+
+1. Click **Actions > Re-import**.
+2. Pick **From Date** and **To Date**. To re-import only some employees, list their
+   BioTime employee codes. Leave the codes empty for everyone.
+
+The imports then read the days, one at a time, for up to 10 minutes each, so a long range
+takes several imports. **Re-import** in the Status section, and the note at the top of the
+form, show how far it is. **Actions > Stop Re-import** stops it, and what it imported stays.
+
+Punches already in Frappe are recognized and not imported twice. The rest go through the
+import as usual: they become checkins, wait, or are left out by the server's settings.
+What the imports read next does not change.
+
+**Attendance already marked stays as it is.** Frappe HR skips a checkin that arrives for a
+day that already has attendance, Absent included, and comments on the checkin why. Days
+without attendance get it at Frappe HR's next attendance run, except days before the
+Shift Type's **Process Attendance After**.
 
 ## After a BioTime restore
 

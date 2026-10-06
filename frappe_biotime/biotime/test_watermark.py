@@ -76,6 +76,19 @@ class TestAttendanceWatermark(BioTimeTestCase):
 		self.assertEqual(self.server.imported_up_to, DAY.replace(hour=8))
 		self.assertIn("9999", self.server.held_back_by)
 
+	def test_punches_from_days_with_attendance_marked_do_not_hold(self) -> None:
+		# Attendance is marked for every day before 3 Oct, two days before the last sync.
+		self.shift("_Test BioTime Day", last_sync=datetime(2026, 10, 5))
+		self.punch("9999", 8)  # 1 Oct, from a new code: it waits, but cannot change attendance
+		recent = now_datetime().replace(microsecond=0) - timedelta(hours=2)
+		self.fake.add_transaction(emp_code="9998", punch_time=recent, terminal_sn=GATE)
+
+		self.run_import()
+
+		self.assertEqual(len(self.waiting()), 2)
+		self.assertEqual(self.server.imported_up_to, recent)
+		self.assertIn("9998", self.server.held_back_by)
+
 	def test_attendance_waits_for_every_server(self) -> None:
 		shift = self.shift("_Test BioTime Day", last_sync=IMPORT_FROM)
 		other = frappe.get_doc(

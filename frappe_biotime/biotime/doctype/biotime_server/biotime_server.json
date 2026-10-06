@@ -59,11 +59,13 @@
   "key_generation",
   "unmapped_codes",
   "last_run_message",
+  "reimport_status",
   "last_push_at",
   "last_push_message",
   "read_state",
   "retry_requested_at",
-  "terminal_reach"
+  "terminal_reach",
+  "reimport_request"
  ],
  "fields": [
   {
@@ -410,6 +412,13 @@
    "read_only": 1
   },
   {
+   "fieldname": "reimport_status",
+   "fieldtype": "Small Text",
+   "label": "Re-import",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
    "fieldname": "last_push_at",
    "fieldtype": "Datetime",
    "label": "Last Push",
@@ -444,6 +453,14 @@
    "fieldtype": "JSON",
    "hidden": 1,
    "label": "Terminal Reach",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "reimport_request",
+   "fieldtype": "JSON",
+   "hidden": 1,
+   "label": "Re-import Request",
    "no_copy": 1,
    "read_only": 1
   }
